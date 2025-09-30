@@ -1,4 +1,4 @@
-package org.github.vincentphan1;
+package org.utd.cs.sentencebuilder;
 
 /**
  * Represents a single word entry in the 'words' table.

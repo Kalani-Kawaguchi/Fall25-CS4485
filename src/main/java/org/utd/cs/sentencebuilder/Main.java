@@ -1,7 +1,4 @@
-package org.github.vincentphan1;
-
-import org.github.vincentphan1.DatabaseManager;
-import java.util.Optional;
+package org.utd.cs.sentencebuilder;
 
 public class Main {
     public static void main(String[] args) {

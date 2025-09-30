@@ -1,4 +1,4 @@
-package org.github.vincentphan1;
+package org.utd.cs.sentencebuilder;
 
 /**
  * Represents a sequence of two words in the 'word_pairs' table.

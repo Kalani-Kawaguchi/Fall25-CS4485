@@ -1,11 +1,7 @@
-package org.github.vincentphan1;
-
-import org.github.vincentphan1.Word;
-import org.github.vincentphan1.WordPair;
+package org.utd.cs.sentencebuilder;
 
 import java.io.InputStream;
 import java.sql.*;
-import java.util.Optional;
 import java.util.Properties;
 
 
