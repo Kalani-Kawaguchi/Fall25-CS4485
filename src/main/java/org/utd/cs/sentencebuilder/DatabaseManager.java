@@ -3,15 +3,12 @@
  * CS4485 - Fall 2025 - Sentence Builder Project
  *
  * Author: Vincent Phan
- * Date: September  2025
+ * Date: September 29, 2025
  *
  * Description:
- *  Tokenizes text files, producing:
- *   - Map<String, Word>  (Word object holds total/start/end counts)
- *   - Map<String, Map<String, Integer>> bigramCounts (prev -> next -> count)
- *
- *  We purposely keep bigram counts keyed by strings here because WordPair
- *  needs word IDs, which we won’t have until after words are inserted in DB.
+ * This class serves as the data access layer for the Sentence Builder application.
+ * It encapsulates all database interactions. It provides methods for both
+ * individual and bulk data operations.
  */
 
 package org.utd.cs.sentencebuilder;
@@ -234,6 +231,31 @@ public class DatabaseManager {
         String sql = "SELECT * FROM words WHERE word_value = ?";
         try (Connection conn = connect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, wordValue);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    Word word = new Word(rs.getString("word_value"));
+                    word.setWordId(rs.getInt("word_id"));
+                    word.setTotalOccurrences(rs.getInt("total_occurrences"));
+                    word.setStartSentenceCount(rs.getInt("start_sentence_count"));
+                    word.setEndSequenceCount(rs.getInt("end_sequence_count"));
+                    return word;
+                }
+            }
+        }
+        return null; // Not found
+    }
+
+    /**
+     * Retrieves a complete Word object from the database by its ID.
+     *
+     * @param wordId The ID of the word to look up.
+     * @return A Word object with all its data, or null if not found.
+     * @throws SQLException if a database access error occurs.
+     */
+    public Word getWord(int wordId) throws SQLException {
+        String sql = "SELECT * FROM words WHERE word_id = ?";
+        try (Connection conn = connect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, wordId);
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
                     Word word = new Word(rs.getString("word_value"));
