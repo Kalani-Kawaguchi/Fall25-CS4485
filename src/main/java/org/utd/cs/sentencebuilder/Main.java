@@ -93,6 +93,8 @@ public class Main {
             System.out.println(unicodeWord);
             System.out.println(emptyWord);
 
+            DatabaseManager.closeDataSource();
+
         } catch (SQLException e) {
             System.err.println("SQL error during testing:");
             e.printStackTrace();
@@ -100,5 +102,6 @@ public class Main {
             System.err.println("Unexpected error:");
             e.printStackTrace();
         }
+
     }
 }

@@ -13,6 +13,11 @@
 
 package org.utd.cs.sentencebuilder;
 
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.InputStream;
 import java.sql.*;
 import java.util.Collection;
@@ -22,37 +27,49 @@ import java.util.Properties;
 
 
 public class DatabaseManager {
-    private static final String DB_URL;
-    private static final String DB_USER;
-    private static final String DB_PASSWORD;
+    private static final Logger logger = LoggerFactory.getLogger(DatabaseManager.class);
+    private static final HikariDataSource dataSource;
 
     static {
-        Properties props = new Properties();
-        // Use a try-with-resources statement to automatically close the stream
-        try (InputStream input = DatabaseManager.class.getClassLoader().getResourceAsStream("config.properties")) {
-            if (input == null) {
-                System.err.println("Error: config.properties file not found in classpath.");
-                throw new RuntimeException("Configuration file not found.");
-            }
-            // Load the properties from the file
-            props.load(input);
+        Properties dbProps = new Properties();
+        Properties poolProps = new Properties();
 
-            // Assign the loaded properties to the final static variables
-            DB_URL = props.getProperty("db.url");
-            DB_USER = props.getProperty("db.user");
-            DB_PASSWORD = props.getProperty("db.password");
+
+        try (
+                InputStream dbInput = DatabaseManager.class.getClassLoader().getResourceAsStream("config.properties");
+                InputStream poolInput = DatabaseManager.class.getClassLoader().getResourceAsStream("pool.properties")
+        ) {
+            if (dbInput == null) {throw new RuntimeException("Database Config file not found.");}
+            if (poolInput == null) {throw new RuntimeException("Pool Config file not found.");}
+
+            dbProps.load(dbInput);
+            poolProps.load(poolInput);
+
+            HikariConfig config = new HikariConfig(poolProps);
+
+            config.setJdbcUrl(dbProps.getProperty("db.url"));
+            config.setUsername(dbProps.getProperty("db.user"));
+            config.setPassword(dbProps.getProperty("db.password"));
+            dataSource = new HikariDataSource(config);
+            logger.info("Database connection pool initialized successfully.");
 
         } catch (Exception e) {
-            e.printStackTrace();
-            // Throw a runtime exception to fail fast if config is missing or invalid
-            throw new RuntimeException("Failed to load database configuration.", e);
+            throw new RuntimeException("❌ Failed to initialize database connection pool.", e);
         }
     }
 
-
-    public Connection connect() throws SQLException {
-        return DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+    public static void closeDataSource() {
+        if (dataSource != null && !dataSource.isClosed()) {
+            System.out.println("Closing database connection pool.");
+            dataSource.close();
+        }
     }
+
+    private Connection getConnect() throws SQLException {
+        return dataSource.getConnection();
+    }
+
+
 
     /**
      * Creates the database schema.
@@ -100,19 +117,19 @@ public class DatabaseManager {
                 "UNIQUE KEY unique_trigram (first_word_id, second_word_id, third_word_id)" +
                 ");";
 
-        try (Connection conn = connect(); Statement stmt = conn.createStatement()) {
-            System.out.println("Building database schema...");
+        try (Connection conn = getConnect(); Statement stmt = conn.createStatement()) {
+            logger.info("Building database schema...");
             stmt.execute(createSourceFileTable);
-            System.out.println("Table 'source_file' created or already exists.");
+            logger.info("Table 'source_file' created or already exists.");
             stmt.execute(createWordsTable);
-            System.out.println("Table 'words' created or already exists.");
+            logger.info("Table 'words' created or already exists.");
             stmt.execute(createWordPairsTable);
-            System.out.println("Table 'word_pairs' created or already exists.");
+            logger.info("Table 'word_pairs' created or already exists.");
             stmt.execute(createTrigramSequenceTable);
-            System.out.println("Table 'trigram_sequence' created or already exists.");
-            System.out.println("Database build complete.");
+            logger.info("Table 'trigram_sequence' created or already exists.");
+            logger.info("Database build complete.");
         } catch (SQLException e) {
-            System.err.println("Database build failed.");
+            logger.error("Database build failed.", e);
             e.printStackTrace();
         }
     }
@@ -126,7 +143,7 @@ public class DatabaseManager {
      */
     public int addSourceFile(String fileName, int wordCount) throws SQLException {
         String sqlInsert = "INSERT INTO source_file(file_name, word_count) VALUES(?, ?)";
-        try (Connection conn = connect();
+        try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sqlInsert, Statement.RETURN_GENERATED_KEYS)) {
 
             pstmt.setString(1, fileName);
@@ -156,7 +173,7 @@ public class DatabaseManager {
                 "start_sentence_count = start_sentence_count + VALUES(start_sentence_count), " +
                 "end_sequence_count = end_sequence_count + VALUES(end_sequence_count)";
 
-        try (Connection conn = connect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        try (Connection conn = getConnect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             for (Word stats : wordCollection) {
                 pstmt.setString(1, stats.getWordValue());
                 pstmt.setInt(2, stats.getTotalOccurrences());
@@ -177,7 +194,7 @@ public class DatabaseManager {
      */
     public int getWordId(String word) throws SQLException {
         String sql = "SELECT word_id FROM words WHERE word_value = ?";
-        try (Connection conn = connect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        try (Connection conn = getConnect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, word);
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
@@ -204,7 +221,7 @@ public class DatabaseManager {
         String placeholders = String.join(",", java.util.Collections.nCopies(words.size(), "?"));
         String sql = "SELECT word_value, word_id FROM words WHERE word_value IN (" + placeholders + ")";
 
-        try (Connection conn = connect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        try (Connection conn = getConnect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             int i = 1;
             for (Word word : words) {
                 pstmt.setString(i++, word.getWordValue());
@@ -229,7 +246,7 @@ public class DatabaseManager {
      */
     public Word getWord(String wordValue) throws SQLException {
         String sql = "SELECT * FROM words WHERE word_value = ?";
-        try (Connection conn = connect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        try (Connection conn = getConnect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, wordValue);
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
@@ -254,7 +271,7 @@ public class DatabaseManager {
      */
     public Word getWord(int wordId) throws SQLException {
         String sql = "SELECT * FROM words WHERE word_id = ?";
-        try (Connection conn = connect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        try (Connection conn = getConnect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, wordId);
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
