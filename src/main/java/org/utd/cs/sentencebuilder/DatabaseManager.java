@@ -75,7 +75,7 @@ public class DatabaseManager {
      * Creates the database schema.
      * This method is idempotent; it won't fail if the tables already exist.
      */
-    public void buildDatabase() {
+    public void buildDatabase() throws SQLException{
         String createSourceFileTable =
                 "CREATE TABLE IF NOT EXISTS source_file (" +
                 "file_id INT AUTO_INCREMENT PRIMARY KEY," +
@@ -133,6 +133,7 @@ public class DatabaseManager {
             e.printStackTrace();
         }
     }
+
     /**
      * Adds a new source file record to the database.
      *
@@ -174,6 +175,11 @@ public class DatabaseManager {
                 "end_sequence_count = end_sequence_count + VALUES(end_sequence_count)";
 
         try (Connection conn = getConnect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            if (wordCollection == null || wordCollection.isEmpty()) {
+                return;
+            }
+
             for (Word stats : wordCollection) {
                 pstmt.setString(1, stats.getWordValue());
                 pstmt.setInt(2, stats.getTotalOccurrences());
@@ -285,6 +291,57 @@ public class DatabaseManager {
             }
         }
         return null; // Not found
+    }
+
+    /**
+     * Inserts or updates a collection of word pairs in a single batch operation.
+     *
+     * @param wordPairs A collection of WordPair objects to be added or updated.
+     * @throws SQLException if a database access error occurs.
+     */
+    public void bulkAddWordPairs(Collection<WordPair> wordPairs) throws SQLException {
+        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count) " +
+                "VALUES (?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count)";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            if (wordPairs == null || wordPairs.isEmpty()) {
+                return;
+            }
+
+            for (WordPair pair : wordPairs) {
+                pstmt.setInt(1, pair.getPrecedingWordId());
+                pstmt.setInt(2, pair.getFollowingWordId());
+                pstmt.setInt(3, pair.getOccurrenceCount());
+                pstmt.addBatch();
+            }
+            pstmt.executeBatch();
+        }
+    }
+
+    /**
+     * Deletes all data from all tables in the database.
+     * This is a destructive operation.
+     * Resets auto-increment counters.
+     *
+     * @throws SQLException if a database access error occurs.
+     */
+
+    public void clearAllData() throws SQLException {
+        logger.warn("--- DELETING ALL DATA FROM DATABASE ---");
+        String[] tables = {"trigram_sequence", "word_pairs", "words", "source_file"};
+
+        try (Connection conn = getConnect(); Statement stmt = conn.createStatement()) {
+            for (String table : tables) {
+                String sql = "TRUNCATE TABLE " + table;
+                logger.info("Executing: {}", sql);
+                stmt.addBatch(sql);
+            }
+            stmt.executeBatch();
+            logger.warn("--- DATABASE CLEARED SUCCESSFULLY ---");
+        }
     }
 
 }

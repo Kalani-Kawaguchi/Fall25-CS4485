@@ -8,9 +8,10 @@ public class Main {
 
         // ai generated test cases
         DatabaseManager db = new DatabaseManager();
-        db.buildDatabase();
 
         try {
+            db.buildDatabase();
+
             // Prepare word collection for batch insert
             List<Word> words = new ArrayList<>();
 
