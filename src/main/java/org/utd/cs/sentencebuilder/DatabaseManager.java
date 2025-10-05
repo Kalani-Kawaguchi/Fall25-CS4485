@@ -143,6 +143,7 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public int addSourceFile(String fileName, int wordCount) throws SQLException {
+        logger.info("Adding new source file record: {}", fileName);
         String sqlInsert = "INSERT INTO source_file(file_name, word_count) VALUES(?, ?)";
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sqlInsert, Statement.RETURN_GENERATED_KEYS)) {
@@ -153,7 +154,9 @@ public class DatabaseManager {
 
             try (ResultSet generatedKeys = pstmt.getGeneratedKeys()) {
                 if (generatedKeys.next()) {
-                    return generatedKeys.getInt(1);
+                    int newId = generatedKeys.getInt(1);
+                    logger.info("Successfully added source file '{}' with file_id {}.", fileName, newId);
+                    return newId;
                 } else {
                     throw new SQLException("Creating source file failed, no ID obtained.");
                 }
@@ -169,6 +172,7 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public int addWord(Word word) throws SQLException {
+        logger.debug("Processing word: '{}'", word.getWordValue());
         String sql = "INSERT INTO words (word_value, total_occurrences, start_sentence_count, end_sequence_count) VALUES (?, ?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE " +
                 "total_occurrences = total_occurrences + VALUES(total_occurrences), " +
@@ -187,8 +191,11 @@ public class DatabaseManager {
             if (affectedRows > 0) {
                 try (ResultSet generatedKeys = pstmt.getGeneratedKeys()) {
                     if (generatedKeys.next()) {
-                        return generatedKeys.getInt(1);
+                        int newId = generatedKeys.getInt(1);
+                        logger.debug("Inserted new word '{}' with word_id {}.", word.getWordValue(), newId);
+                        return newId;
                     } else {
+                        logger.debug("Updated existing word '{}'.", word.getWordValue());
                         return 0;
                     }
                 }
@@ -205,6 +212,11 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public void addWordsInBatch(Collection<Word> wordCollection) throws SQLException {
+        if (wordCollection == null || wordCollection.isEmpty()) {
+            logger.info("Word collection is empty. No action taken.");
+            return;
+        }
+        logger.info("Executing batch insert/update for {} words.", wordCollection.size());
         String sql = "INSERT INTO words (word_value, total_occurrences, start_sentence_count, end_sequence_count) VALUES (?, ?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE " +
                 "total_occurrences = total_occurrences + VALUES(total_occurrences), " +
@@ -212,10 +224,6 @@ public class DatabaseManager {
                 "end_sequence_count = end_sequence_count + VALUES(end_sequence_count)";
 
         try (Connection conn = getConnect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            if (wordCollection == null || wordCollection.isEmpty()) {
-                return;
-            }
 
             for (Word stats : wordCollection) {
                 pstmt.setString(1, stats.getWordValue());
@@ -225,6 +233,7 @@ public class DatabaseManager {
                 pstmt.addBatch();
             }
             pstmt.executeBatch();
+            logger.info("Batch execution for words complete.");
         }
     }
 
@@ -236,15 +245,19 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public int getWordId(String word) throws SQLException {
+        logger.debug("Querying for word_id of '{}'.", word);
         String sql = "SELECT word_id FROM words WHERE word_value = ?";
         try (Connection conn = getConnect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, word);
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
-                    return rs.getInt("word_id");
+                    int wordId = rs.getInt("word_id");
+                    logger.debug("Found word_id {} for word '{}'.", wordId, word);
+                    return wordId;
                 }
             }
         }
+        logger.debug("Word '{}' not found in database.", word);
         return -1; // Not found
     }
 
@@ -260,6 +273,7 @@ public class DatabaseManager {
         if (words == null || words.isEmpty()) {
             return wordIdMap;
         }
+        logger.debug("Querying for word_ids of {} words.", words.size());
 
         String placeholders = String.join(",", java.util.Collections.nCopies(words.size(), "?"));
         String sql = "SELECT word_value, word_id FROM words WHERE word_value IN (" + placeholders + ")";
@@ -276,6 +290,7 @@ public class DatabaseManager {
                 }
             }
         }
+        logger.debug("Retrieved {} word_ids.", wordIdMap.size());
         return wordIdMap;
     }
 
@@ -288,6 +303,7 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public Word getWord(String wordValue) throws SQLException {
+        logger.debug("Querying for full word object for '{}'.", wordValue);
         String sql = "SELECT * FROM words WHERE word_value = ?";
         try (Connection conn = getConnect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, wordValue);
@@ -298,10 +314,12 @@ public class DatabaseManager {
                     word.setTotalOccurrences(rs.getInt("total_occurrences"));
                     word.setStartSentenceCount(rs.getInt("start_sentence_count"));
                     word.setEndSequenceCount(rs.getInt("end_sequence_count"));
+                    logger.debug("Found word object for '{}'.", wordValue);
                     return word;
                 }
             }
         }
+        logger.debug("Word object for '{}' not found.", wordValue);
         return null; // Not found
     }
 
@@ -313,6 +331,7 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public Word getWord(int wordId) throws SQLException {
+        logger.debug("Querying for full word object for word_id {}.", wordId);
         String sql = "SELECT * FROM words WHERE word_id = ?";
         try (Connection conn = getConnect(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, wordId);
@@ -323,10 +342,12 @@ public class DatabaseManager {
                     word.setTotalOccurrences(rs.getInt("total_occurrences"));
                     word.setStartSentenceCount(rs.getInt("start_sentence_count"));
                     word.setEndSequenceCount(rs.getInt("end_sequence_count"));
+                    logger.debug("Found word object for word_id {}.", wordId);
                     return word;
                 }
             }
         }
+        logger.debug("Word object for word_id {} not found.", wordId);
         return null; // Not found
     }
 
@@ -338,6 +359,7 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public int addWordPair(WordPair pair) throws SQLException {
+        logger.debug("Processing word pair: preceding_id={}, following_id={}", pair.getPrecedingWordId(), pair.getFollowingWordId());
         String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count) " +
                 "VALUES (?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count)";
@@ -353,9 +375,10 @@ public class DatabaseManager {
             if (affectedRows > 0) {
                 try (ResultSet generatedKeys = pstmt.getGeneratedKeys()) {
                     if (generatedKeys.next()) {
-                        return generatedKeys.getInt(1); // Return new ID on INSERT
+                        int newId = generatedKeys.getInt(1);
+                        logger.debug("Inserted new word pair with sequence_id {}.", newId);
+                        return newId;
                     } else {
-                        // On UPDATE, no keys are generated. Return 0 to indicate an update occurred.
                         return 0;
                     }
                 }
@@ -380,6 +403,7 @@ public class DatabaseManager {
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
             if (wordPairs == null || wordPairs.isEmpty()) {
+                logger.info("Word pairs collection is empty. No action taken.");
                 return;
             }
 
@@ -389,7 +413,9 @@ public class DatabaseManager {
                 pstmt.setInt(3, pair.getOccurrenceCount());
                 pstmt.addBatch();
             }
+            logger.info("Executing batch insert/update for {} word pairs.", wordPairs.size());
             pstmt.executeBatch();
+            logger.info("Batch execution for word pairs complete.");
         }
     }
 
@@ -406,13 +432,22 @@ public class DatabaseManager {
         String[] tables = {"trigram_sequence", "word_pairs", "words", "source_file"};
 
         try (Connection conn = getConnect(); Statement stmt = conn.createStatement()) {
-            for (String table : tables) {
-                String sql = "TRUNCATE TABLE " + table;
-                logger.info("Executing: {}", sql);
-                stmt.addBatch(sql);
+            try {
+                logger.info("Disabling foreign key checks.");
+                stmt.execute("SET FOREIGN_KEY_CHECKS = 0");
+
+                for (String table : tables) {
+                    String sql = "TRUNCATE TABLE " + table;
+                    logger.info("Executing: {}", sql);
+                    stmt.addBatch(sql);
+                }
+                stmt.executeBatch();
+
+                logger.warn("--- DATABASE CLEARED SUCCESSFULLY ---");
+            } finally {
+                logger.info("Re-enabling foreign key checks.");
+                stmt.execute("SET FOREIGN_KEY_CHECKS = 1");
             }
-            stmt.executeBatch();
-            logger.warn("--- DATABASE CLEARED SUCCESSFULLY ---");
         }
     }
 

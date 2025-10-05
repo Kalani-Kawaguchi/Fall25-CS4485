@@ -5,104 +5,93 @@ import java.util.*;
 
 public class Main {
     public static void main(String[] args) {
-
-        // ai generated test cases
         DatabaseManager db = new DatabaseManager();
 
         try {
+            System.out.println("=== Sentence Builder Database Test ===");
+
+            // 1️⃣ Build schema (creates tables if they don't exist)
+            System.out.println("Building database schema...");
             db.buildDatabase();
 
-            // Prepare word collection for batch insert
-            List<Word> words = new ArrayList<>();
+            // 2️⃣ Clear existing data (optional for clean test runs)
+            System.out.println("Clearing all data...");
+            db.clearAllData();
 
-            Word w1 = new Word("hello");
-            w1.setTotalOccurrences(3);
-            w1.setStartSentenceCount(1);
-            w1.setEndSequenceCount(0);
+            // 3️⃣ Add a source file record
+            System.out.println("Inserting source file record...");
+            int fileId = db.addSourceFile("sample_text.txt", 120);
+            System.out.println("Inserted source file with ID: " + fileId);
 
-            Word w2 = new Word("world");
-            w2.setTotalOccurrences(2);
-            w2.setStartSentenceCount(0);
-            w2.setEndSequenceCount(1);
+            // 4️⃣ Insert words individually
+            System.out.println("Adding words...");
+            Word the = new Word("the");
+            the.setTotalOccurrences(10);
+            the.setStartSentenceCount(3);
 
-            Word w3 = new Word("naïve"); // Unicode test
-            w3.setTotalOccurrences(1);
-            w3.setStartSentenceCount(0);
-            w3.setEndSequenceCount(0);
+            Word cat = new Word("cat");
+            cat.setTotalOccurrences(5);
+            cat.setEndSequenceCount(2);
 
-            Word w4 = new Word(""); // Empty string test
-            w4.setTotalOccurrences(1);
-            w4.setStartSentenceCount(0);
-            w4.setEndSequenceCount(0);
+            db.addWord(the);
+            db.addWord(cat);
 
-            Word w5 = new Word("hello"); // Duplicate entry test
-            w5.setTotalOccurrences(5);
-            w5.setStartSentenceCount(0);
-            w5.setEndSequenceCount(2);
-
-            words.add(w1);
-            words.add(w2);
-            words.add(w3);
-            words.add(w4);
-            words.add(w5);
-
-            System.out.println("\n=== Testing addWordsInBatch() ===");
-            db.addWordsInBatch(words);
-            System.out.println("Words inserted/updated successfully.");
-
-            // Fetch single word ID
-            System.out.println("\n=== Testing getWordId() ===");
-            int helloId = db.getWordId("hello");
-            int worldId = db.getWordId("world");
-            int missingId = db.getWordId("missing");
-
-            System.out.println("ID for 'hello': " + helloId);
-            System.out.println("ID for 'world': " + worldId);
-            System.out.println("ID for 'missing' (should be -1): " + missingId);
-
-            // Fetch multiple IDs
-            System.out.println("\n=== Testing getWordIds() ===");
-            List<Word> lookupWords = Arrays.asList(
-                    new Word("hello"),
-                    new Word("world"),
-                    new Word("naïve"),
-                    new Word("missing")
-            );
-
-            Map<String, Integer> wordIds = db.getWordIds(lookupWords);
-
-            for (Map.Entry<String, Integer> entry : wordIds.entrySet()) {
-                System.out.printf("Word '%s' -> ID %d%n", entry.getKey(), entry.getValue());
+            // 5️⃣ Query a word
+            Word fetchedWord = db.getWord("cat");
+            if (fetchedWord != null) {
+                System.out.println("Fetched word: " + fetchedWord);
+            } else {
+                System.out.println("Word not found in database.");
             }
 
-            // Check for empty or null inputs
-            System.out.println("\n=== Testing getWordIds() with empty list ===");
-            Map<String, Integer> emptyResult = db.getWordIds(Collections.emptyList());
-            System.out.println("Result for empty list: " + emptyResult);
+            // 6️⃣ Insert a word pair (e.g., "the cat")
+            System.out.println("Adding word pair...");
+            int theId = db.getWordId("the");
+            int catId = db.getWordId("cat");
 
-            System.out.println("\n=== Testing getWordIds() with null ===");
-            Map<String, Integer> nullResult = db.getWordIds(null);
-            System.out.println("Result for null input: " + nullResult);
+            if (theId > 0 && catId > 0) {
+                WordPair pair = new WordPair(theId, catId);
+                pair.setOccurrenceCount(3);
+                int pairId = db.addWordPair(pair);
+                System.out.println("Inserted/Updated word pair (sequence ID: " + pairId + ")");
+            }
 
-            // Check for retrieval of Word objects
-            System.out.println("\n=== Fetching full Word objects from DB ===");
-            Word helloWord = db.getWord("hello");
-            Word unicodeWord = db.getWord("naïve");
-            Word emptyWord = db.getWord("");
+            // 7️⃣ Insert words in batch
+            System.out.println("Adding batch of words...");
+            List<Word> moreWords = List.of(
+                    new Word("dog"),
+                    new Word("sat"),
+                    new Word("mat")
+            );
+            db.addWordsInBatch(moreWords);
+            System.out.println("Batch insert complete.");
 
-            System.out.println(helloWord);
-            System.out.println(unicodeWord);
-            System.out.println(emptyWord);
+            // 8️⃣ Verify word IDs
+            Map<String, Integer> wordIds = db.getWordIds(moreWords);
+            System.out.println("Word IDs retrieved: " + wordIds);
 
-            DatabaseManager.closeDataSource();
+            // 9️⃣ Bulk insert word pairs
+            System.out.println("Adding bulk word pairs...");
+            List<WordPair> wordPairs = new ArrayList<>();
+            wordPairs.add(new WordPair(wordIds.get("dog"), wordIds.get("sat")));
+            wordPairs.add(new WordPair(wordIds.get("sat"), wordIds.get("mat")));
+            db.bulkAddWordPairs(wordPairs);
+            System.out.println("Bulk word pairs added successfully.");
+
+            // 🔟 Confirm a word pair update
+            WordPair repeatPair = new WordPair(theId, catId);
+            repeatPair.setOccurrenceCount(1);
+            db.addWordPair(repeatPair);
+            System.out.println("Incremented occurrence count for 'the cat'.");
+
+            System.out.println("=== ✅ Database test completed successfully! ===");
 
         } catch (SQLException e) {
-            System.err.println("SQL error during testing:");
+            System.err.println("❌ Database operation failed: " + e.getMessage());
             e.printStackTrace();
-        } catch (Exception e) {
-            System.err.println("Unexpected error:");
-            e.printStackTrace();
+        } finally {
+            // Cleanly shut down Hikari connection pool
+            DatabaseManager.closeDataSource();
         }
-
     }
 }
