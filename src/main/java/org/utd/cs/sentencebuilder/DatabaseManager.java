@@ -162,6 +162,43 @@ public class DatabaseManager {
     }
 
     /**
+     * Inserts a new word or updates its counts if it already exists.
+     *
+     * @param word The Word object to add or update.
+     * @return The word_id of the newly created word, or 0 if the word was updated.
+     * @throws SQLException if a database access error occurs.
+     */
+    public int addWord(Word word) throws SQLException {
+        String sql = "INSERT INTO words (word_value, total_occurrences, start_sentence_count, end_sequence_count) VALUES (?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE " +
+                "total_occurrences = total_occurrences + VALUES(total_occurrences), " +
+                "start_sentence_count = start_sentence_count + VALUES(start_sentence_count), " +
+                "end_sequence_count = end_sequence_count + VALUES(end_sequence_count)";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+
+            pstmt.setString(1, word.getWordValue());
+            pstmt.setInt(2, word.getTotalOccurrences());
+            pstmt.setInt(3, word.getStartSentenceCount());
+            pstmt.setInt(4, word.getEndSequenceCount());
+            int affectedRows = pstmt.executeUpdate();
+
+            if (affectedRows > 0) {
+                try (ResultSet generatedKeys = pstmt.getGeneratedKeys()) {
+                    if (generatedKeys.next()) {
+                        return generatedKeys.getInt(1);
+                    } else {
+                        return 0;
+                    }
+                }
+            } else {
+                throw new SQLException("Creating/updating word failed, no rows affected.");
+            }
+        }
+    }
+
+    /**
      * Inserts or updates a collection of words in a single batch operation.
      *
      * @param wordCollection A collection of Word objects with aggregated data.
@@ -291,6 +328,41 @@ public class DatabaseManager {
             }
         }
         return null; // Not found
+    }
+
+    /**
+     * Inserts a new word pair or updates the occurrence count if it already exists.
+     *
+     * @param pair The WordPair object containing the preceding and following word IDs.
+     * @return The sequence_id of the newly created word pair, or 0 if the pair was updated.
+     * @throws SQLException if a database access error occurs.
+     */
+    public int addWordPair(WordPair pair) throws SQLException {
+        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count) " +
+                "VALUES (?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count)";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+
+            pstmt.setInt(1, pair.getPrecedingWordId());
+            pstmt.setInt(2, pair.getFollowingWordId());
+            pstmt.setInt(3, pair.getOccurrenceCount() > 0 ? pair.getOccurrenceCount() : 1);
+            int affectedRows = pstmt.executeUpdate();
+
+            if (affectedRows > 0) {
+                try (ResultSet generatedKeys = pstmt.getGeneratedKeys()) {
+                    if (generatedKeys.next()) {
+                        return generatedKeys.getInt(1); // Return new ID on INSERT
+                    } else {
+                        // On UPDATE, no keys are generated. Return 0 to indicate an update occurred.
+                        return 0;
+                    }
+                }
+            } else {
+                throw new SQLException("Creating/updating word pair failed, no rows affected.");
+            }
+        }
     }
 
     /**
