@@ -1,3 +1,18 @@
+/**
+ * ImporterCli.java
+ * CS4485 - Fall 2025 - Sentence Builder Project
+ *
+ * Author: Kevin Tran
+ * Date: October 6, 2025
+ *
+ * Description:
+ * Walks a folder (default: data/clean), tokenizes .txt files,
+ * upserts words per file, then global bigrams using word IDs.
+ */
+
+
+
+
 package org.utd.cs.sentencebuilder;
 
 import java.io.IOException;
