@@ -45,6 +45,7 @@ public class DatabaseManager {
             dbProps.load(dbInput);
             poolProps.load(poolInput);
 
+            logger.info("Attempting to connect to database: {}", dbProps.getProperty("db.url"));
             HikariConfig config = new HikariConfig(poolProps);
 
             config.setJdbcUrl(dbProps.getProperty("db.url"));
