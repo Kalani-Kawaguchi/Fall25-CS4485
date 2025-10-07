@@ -9,13 +9,13 @@ import java.util.stream.Collectors;
 /**
  * ImporterCli
  * Walks a folder (default: data/clean), tokenizes .txt files,
- * upserts words per file, then global bigrams using word IDs.
+ * upserts words per file, then (optionally) global bigrams using word IDs.
  *
  * Usage:
  *   mvn -q -DskipTests compile
- *   java -cp target/classes org.utd.cs.sentencebuilder.ImporterCli           // data/clean, words+bigrams
- *   java -cp target/classes org.utd.cs.sentencebuilder.ImporterCli --words-only
- *   java -cp target/classes org.utd.cs.sentencebuilder.ImporterCli path/to/folder
+ *   mvn -q -DskipTests exec:java -Dexec.mainClass=org.utd.cs.sentencebuilder.ImporterCli
+ *   mvn -q -DskipTests exec:java -Dexec.mainClass=org.utd.cs.sentencebuilder.ImporterCli -Dexec.args="--words-only"
+ *   mvn -q -DskipTests exec:java -Dexec.mainClass=org.utd.cs.sentencebuilder.ImporterCli -Dexec.args="path/to/folder"
  */
 public class ImporterCli {
 
@@ -30,6 +30,7 @@ public class ImporterCli {
         System.out.println("Scanning: " + root.toAbsolutePath());
         System.out.println("Mode: " + (wordsOnly ? "WORDS ONLY" : "WORDS + BIGRAMS"));
 
+        DatabaseManager db = null;
         try {
             List<Path> files = listTextFiles(root);
             if (files.isEmpty()) {
@@ -37,27 +38,28 @@ public class ImporterCli {
                 return;
             }
 
-            // Accumulate all words/bigrams across files
+            db = new DatabaseManager();
+
+            // Accumulate across ALL files (we resolve IDs once at the end)
             Map<String, Word> globalWords = new HashMap<>();
             Map<String, Map<String, Integer>> globalBigrams = new HashMap<>();
 
-            DatabaseManager db = new DatabaseManager();
-
             for (Path p : files) {
                 System.out.println("\n--- Processing: " + p.getFileName() + " ---");
-                String text = Files.readString(p);
 
+                String text = Files.readString(p);
                 Tokenizer.Result r = Tokenizer.process(text);
+
                 System.out.println("Tokens: " + r.tokens.size() + " | Unique words: " + r.words.size());
 
-                // Optional: log file entry
+                // record source file row (non-fatal if it fails)
                 try {
                     db.addSourceFile(p.getFileName().toString(), r.tokens.size());
                 } catch (SQLException ex) {
                     System.err.println("addSourceFile failed for " + p.getFileName() + ": " + ex.getMessage());
                 }
 
-                // Upsert words for THIS file
+                // upsert words for THIS file
                 try {
                     db.addWordsInBatch(r.words.values());
                 } catch (SQLException ex) {
@@ -67,41 +69,52 @@ public class ImporterCli {
                     continue;
                 }
 
-                // Merge into global aggregates (for one final ID lookup + bigram insert)
+                // accumulate into global aggregates for one-time ID resolution
                 mergeWords(globalWords, r.words);
                 if (!wordsOnly) {
                     mergeBigrams(globalBigrams, r.bigramCounts);
                 }
             }
 
-            // Resolve IDs once (global word set)
-            Map<String, Integer> wordIds = Map.of();
+            if (globalWords.isEmpty()) {
+                System.out.println("\nNothing to insert (no words collected).");
+                return;
+            }
+
+            if (wordsOnly) {
+                System.out.println("\nWords-only run complete.");
+                return;
+            }
+
+            // ---- BIGRAMS PATH ----
+            // Resolve word IDs once across the global set
+            Map<String, Integer> wordIds;
             try {
-                wordIds = new DatabaseManager().getWordIds(globalWords.values());
+                wordIds = db.getWordIds(globalWords.values());
                 System.out.println("\nResolved " + wordIds.size() + " word IDs.");
             } catch (SQLException ex) {
                 System.err.println("getWordIds failed: " + ex.getMessage());
                 ex.printStackTrace();
+                return;
             }
 
-            if (!wordsOnly) {
-                // Convert bigrams → WordPair (IDs) and bulk insert
-                List<WordPair> pairs = toWordPairs(globalBigrams, wordIds);
-                System.out.println("Prepared " + pairs.size() + " word pairs. Inserting...");
-                try {
-                    new DatabaseManager().bulkAddWordPairs(pairs);
-                    System.out.println("Inserted bigrams.");
-                } catch (SQLException ex) {
-                    System.err.println("bulkAddWordPairs failed: " + ex.getMessage());
-                    ex.printStackTrace();
-                }
+            // Convert (prev->next->count) into WordPair objects with IDs and insert
+            List<WordPair> pairs = toWordPairs(globalBigrams, wordIds);
+            System.out.println("Prepared " + pairs.size() + " word pairs. Inserting...");
+            try {
+                db.bulkAddWordPairs(pairs);
+                System.out.println("Inserted bigrams.");
+            } catch (SQLException ex) {
+                System.err.println("bulkAddWordPairs failed: " + ex.getMessage());
+                ex.printStackTrace();
             }
 
             System.out.println("\nDone.");
-            DatabaseManager.closeDataSource();
-
         } catch (IOException e) {
             e.printStackTrace();
+        } finally {
+            // always release the pool cleanly
+            DatabaseManager.closeDataSource();
         }
     }
 
