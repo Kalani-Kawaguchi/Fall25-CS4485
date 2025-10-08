@@ -39,5 +39,8 @@ build/
 ### Mac OS ###
 .DS_Store
 
+### Data Sources
+data/
+
 # Database Config.
 config.properties
