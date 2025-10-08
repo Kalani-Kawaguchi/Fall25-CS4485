@@ -20,10 +20,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
 import java.sql.*;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 
 
 public class DatabaseManager {
@@ -353,6 +350,38 @@ public class DatabaseManager {
     }
 
     /**
+     * Retrieves all words from the database and returns them as a map.
+     *
+     * @return A Map where the key is the word_id (Integer) and the value is the complete Word object.
+     * @throws SQLException if a database access error occurs.
+     */
+    public Map<Integer, Word> getAllWords() throws SQLException {
+        logger.info("Retrieving all words from the database to build dictionary.");
+        Map<Integer, Word> wordMap = new HashMap<>();
+        String sql = "SELECT word_id, word_value, total_occurrences, start_sentence_count, end_sequence_count FROM words";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                Word word = new Word(rs.getString("word_value"));
+                word.setWordId(rs.getInt("word_id"));
+                word.setTotalOccurrences(rs.getInt("total_occurrences"));
+                word.setStartSentenceCount(rs.getInt("start_sentence_count"));
+                word.setEndSequenceCount(rs.getInt("end_sequence_count"));
+                wordMap.put(word.getWordId(), word);
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to retrieve all words.", e);
+            throw e; // Re-throw after logging
+        }
+
+        logger.info("Successfully retrieved {} words.", wordMap.size());
+        return wordMap;
+    }
+
+    /**
      * Inserts a new word pair or updates the occurrence count if it already exists.
      *
      * @param pair The WordPair object containing the preceding and following word IDs.
@@ -418,6 +447,38 @@ public class DatabaseManager {
             pstmt.executeBatch();
             logger.info("Batch execution for word pairs complete.");
         }
+    }
+
+    /**
+     * Retrieves all word pairs from the database as a collection of WordPair objects.
+     *
+     * @return A Collection of all WordPair objects from the database.
+     * @throws SQLException if a database access error occurs.
+     */
+    public Collection<WordPair> getAllWordPairs() throws SQLException {
+        logger.info("Retrieving all word pair objects from the database.");
+        Collection<WordPair> allPairs = new ArrayList<>();
+        String sql = "SELECT sequence_id, preceding_word_id, following_word_id, occurrence_count FROM word_pairs";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                WordPair pair = new WordPair();
+                pair.setSequenceId(rs.getInt("sequence_id"));
+                pair.setPrecedingWordId(rs.getInt("preceding_word_id"));
+                pair.setFollowingWordId(rs.getInt("following_word_id"));
+                pair.setOccurrenceCount(rs.getInt("occurrence_count"));
+                allPairs.add(pair);
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to retrieve all word pairs.", e);
+            throw e; // Re-throw the exception after logging
+        }
+
+        logger.info("Successfully retrieved {} word pairs.", allPairs.size());
+        return allPairs;
     }
 
     /**
