@@ -86,6 +86,7 @@ public class Main {
 
             System.out.println("=== ✅ Database test completed successfully! ===");
 
+            Javafx.main(args);
         } catch (SQLException e) {
             System.err.println("❌ Database operation failed: " + e.getMessage());
             e.printStackTrace();
