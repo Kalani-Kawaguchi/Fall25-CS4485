@@ -1,3 +1,15 @@
+/**
+ * JavaFX.java
+ * CS4485 - Fall 2025 - Sentence Builder Project
+ *
+ * Author: Kalani Kawaguchi
+ * Date: October 6 2025
+ *
+ * Description:
+ * Simple UI with some placeholders.
+ * Upload file button allows users to upload .txt files to be saved to the
+ * data folder. Uploaded file will then be imported to the DB
+ */
 package org.utd.cs.sentencebuilder;
 
 import javafx.application.Application;
@@ -94,11 +106,13 @@ public class Javafx extends Application {
         File file = fileChooser.showOpenDialog(stage);
 
         if (file != null) {
-            Path dest = Path.of("data", file.getName());
+            Path dest = Path.of("data/clean", file.getName());
 
             try {
                 Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
                 System.out.println("File saved");
+                String[] args = {};
+                ImporterCli.main(args);
             } catch (IOException e) {
                 e.printStackTrace();
             }
