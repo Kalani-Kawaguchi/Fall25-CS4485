@@ -67,6 +67,12 @@ public class DatabaseManager {
         return dataSource.getConnection();
     }
 
+    // Public-facing connection getter for external classes (e.g., sentence generators)
+    public Connection getConnection() throws SQLException {
+        return getConnect();
+    }
+
+
 
 
     /**
