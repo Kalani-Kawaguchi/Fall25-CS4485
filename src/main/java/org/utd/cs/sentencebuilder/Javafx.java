@@ -13,22 +13,22 @@ import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 public class Javafx extends Application {
 
     private static final int MAX_WORDS = 1;
+    private static final FileChooser fileChooser = new FileChooser();
 
     @Override
     public void start(Stage stage) {
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("Text Files", "*.txt")
-        );
-
         // Upload File Row
         Button uploadButton = new Button("Upload a Text FIle");
         uploadButton.setOnAction(actionEvent -> {
-            File file = fileChooser.showOpenDialog(stage);
+            selectFile(stage);
         });
 
         // Top
@@ -85,4 +85,25 @@ public class Javafx extends Application {
         return output;
     }
 
+    public static void selectFile(Stage stage){
+        fileChooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("Text Files", "*.txt")
+        );
+
+        fileChooser.setTitle("Upload a .txt file");
+        File file = fileChooser.showOpenDialog(stage);
+
+        if (file != null) {
+            Path dest = Path.of("data", file.getName());
+
+            try {
+                Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
+                System.out.println("File saved");
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        } else {
+            System.out.println("No file");
+        }
+    }
 }
