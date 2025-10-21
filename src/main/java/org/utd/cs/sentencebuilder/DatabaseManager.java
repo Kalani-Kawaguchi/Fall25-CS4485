@@ -163,6 +163,40 @@ public class DatabaseManager {
     }
 
     /**
+     * Retrieves all source files from the database and returns them as a map.
+     *
+     * @return A Map where the key is the file_name (String) and the value is the complete SourceFile record.
+     * @throws SQLException if a database access error occurs.
+     */
+    public Map<String, SourceFile> getAllSourceFiles() throws SQLException {
+        logger.info("Retrieving all source files from the database.");
+        Map<String, SourceFile> fileMap = new HashMap<>();
+        String sql = "SELECT file_id, file_name, word_count, import_timestamp FROM source_file";
+
+        // Assumes you have a getConnect() method like in your example
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                SourceFile file = new SourceFile(
+                        rs.getInt("file_id"),
+                        rs.getString("file_name"),
+                        rs.getInt("word_count"),
+                        rs.getTimestamp("import_timestamp")
+                );
+
+                fileMap.put(file.fileName(), file);
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to retrieve all source files.", e);
+            throw e;
+        }
+        logger.info("Successfully retrieved {} source files.", fileMap.size());
+        return fileMap;
+    }
+
+    /**
      * Inserts a new word or updates its counts if it already exists.
      *
      * @param word The Word object to add or update.
@@ -374,7 +408,7 @@ public class DatabaseManager {
             }
         } catch (SQLException e) {
             logger.error("Failed to retrieve all words.", e);
-            throw e; // Re-throw after logging
+            throw e;
         }
 
         logger.info("Successfully retrieved {} words.", wordMap.size());
@@ -474,7 +508,7 @@ public class DatabaseManager {
             }
         } catch (SQLException e) {
             logger.error("Failed to retrieve all word pairs.", e);
-            throw e; // Re-throw the exception after logging
+            throw e;
         }
 
         logger.info("Successfully retrieved {} word pairs.", allPairs.size());
