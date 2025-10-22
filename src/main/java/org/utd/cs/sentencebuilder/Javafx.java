@@ -29,13 +29,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Stack;
 
 public class Javafx extends Application {
 
     private static final int MAX_WORDS = 1;
     private static final FileChooser fileChooser = new FileChooser();
     private static Scene homeScene;
-    private static Scene scene2;
+    private static Scene historyScene;
 
     @Override
     public void start(Stage stage) {
@@ -44,7 +45,7 @@ public class Javafx extends Application {
         createHomeScene(stage);
 
         // Scene 2
-        createScene2(stage);
+        createHistoryScene(stage);
 
         stage.setScene(homeScene);
         stage.setTitle("Sentence Builder");
@@ -125,8 +126,8 @@ public class Javafx extends Application {
         TextArea output = outputRow();
 
         // Swap Scene Button
-        Button toScene2Button = new Button("To Scene 2");
-        toScene2Button.setOnAction(e -> stage.setScene(scene2));
+        Button toScene2Button = new Button("To Upload History");
+        toScene2Button.setOnAction(e -> stage.setScene(historyScene));
 
         // Main
         VBox root = new VBox(20, uploadButton, inputRow, output, toScene2Button);
@@ -138,10 +139,16 @@ public class Javafx extends Application {
         homeScene = new Scene(container, 640, 480);
     }
 
-    public static void createScene2(Stage stage){
-        Button toHomeSceneButton = new Button("To Home Scene");
+    public static void createHistoryScene(Stage stage){
+        Button toHomeSceneButton = new Button("To Sentence Builder");
         toHomeSceneButton.setOnAction(e -> stage.setScene(homeScene));
-        VBox root2 = new VBox(20, toHomeSceneButton);
-        scene2 = new Scene(root2, 640, 480);
+
+        VBox root = new VBox(20, toHomeSceneButton);
+        root.setAlignment(Pos.CENTER);
+
+        StackPane container = new StackPane(root);
+        container.setAlignment(Pos.CENTER);
+
+        historyScene = new Scene(container, 640, 480);
     }
 }
