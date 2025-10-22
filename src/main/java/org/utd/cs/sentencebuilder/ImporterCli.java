@@ -55,12 +55,33 @@ public class ImporterCli {
 
             db = new DatabaseManager();
 
+            // Vincent Phan
+            // Get SourceFiles already in db as a hashmap.
+            Map<String, SourceFile> importedFilesMap;
+            try {
+                importedFilesMap = db.getAllSourceFiles();
+                System.out.println("Found " + importedFilesMap.size() + " files already in database.");
+            } catch (SQLException e) {
+                System.err.println("CRITICAL: Could not retrieve existing file list from database. Aborting.");
+                e.printStackTrace();
+                return; // Can't safely continue if this fails
+            }
+            //end
+
             // Accumulate across ALL files (we resolve IDs once at the end)
             Map<String, Word> globalWords = new HashMap<>();
             Map<String, Map<String, Integer>> globalBigrams = new HashMap<>();
 
             for (Path p : files) {
                 System.out.println("\n--- Processing: " + p.getFileName() + " ---");
+
+                // Vincent Phan
+                if (importedFilesMap.containsKey(p.getFileName().toString())) {
+                    System.out.println("File already imported.");
+                    continue; // Skip all processing for this file
+                }
+                //end
+
 
                 String text = Files.readString(p);
                 Tokenizer.Result r = Tokenizer.process(text);
