@@ -150,7 +150,7 @@ public class ImporterCli {
             e.printStackTrace();
         } finally {
             // always release the pool cleanly
-            DatabaseManager.closeDataSource();
+//            DatabaseManager.closeDataSource();
         }
     }
 
