@@ -30,6 +30,8 @@ public class Tokenizer {
         public final Map<String, Word> words = new HashMap<>();
         /** Bigram counts: prevWord -> (nextWord -> count). */
         public final Map<String, Map<String, Integer>> bigramCounts = new HashMap<>();
+        /** Trigram counts: token1 -> (token2 -> (token3 -> count)). */
+        public final Map<String, Map<String, Map<String, Integer>>> trigramCounts = new HashMap<>();
         /** Flat list of tokens (mostly for debugging/printing). */
         public final List<String> tokens = new ArrayList<>();
     }
@@ -78,11 +80,21 @@ public static Result process(String text) {
 
         // 3) bigram counts (string-string for now)
         for (int i = 0; i + 1 < r.tokens.size(); i++) {
-            String prev = r.tokens.get(i);
-            String next = r.tokens.get(i + 1);
+            String token1 = r.tokens.get(i);
+            String token2 = r.tokens.get(i + 1);
             r.bigramCounts
-                    .computeIfAbsent(prev, k -> new HashMap<>())
-                    .merge(next, 1, Integer::sum);
+                    .computeIfAbsent(token1, k -> new HashMap<>())
+                    .merge(token2, 1, Integer::sum);
+
+
+            //Vincent Phan: Add one more index to our sliding window for trigrams
+            if (i + 2 < r.tokens.size()) {
+                String token3 = r.tokens.get(i + 2);
+                r.trigramCounts
+                        .computeIfAbsent(token1, k -> new HashMap<>())
+                        .computeIfAbsent(token2, k -> new HashMap<>())
+                        .merge(token3, 1, Integer::sum);
+            }
         }
 
         return r;

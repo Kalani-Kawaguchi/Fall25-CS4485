@@ -12,6 +12,9 @@ public class Main {
             db.buildDatabase();
 
             Javafx.main(args);
+
+            // for testing.
+            db.clearAllData();
         } catch (SQLException e) {
             System.err.println("❌ Database operation failed: " + e.getMessage());
             e.printStackTrace();

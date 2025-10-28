@@ -71,6 +71,7 @@ public class ImporterCli {
             // Accumulate across ALL files (we resolve IDs once at the end)
             Map<String, Word> globalWords = new HashMap<>();
             Map<String, Map<String, Integer>> globalBigrams = new HashMap<>();
+            Map<String, Map<String, Map<String, Integer>>> globalTrigrams = new HashMap<>();
 
             for (Path p : files) {
                 System.out.println("\n--- Processing: " + p.getFileName() + " ---");
@@ -109,6 +110,7 @@ public class ImporterCli {
                 mergeWords(globalWords, r.words);
                 if (!wordsOnly) {
                     mergeBigrams(globalBigrams, r.bigramCounts);
+                    mergeTrigrams(globalTrigrams, r.trigramCounts);
                 }
             }
 
@@ -142,6 +144,18 @@ public class ImporterCli {
                 System.out.println("Inserted bigrams.");
             } catch (SQLException ex) {
                 System.err.println("bulkAddWordPairs failed: " + ex.getMessage());
+                ex.printStackTrace();
+            }
+
+            // ---- TRIGRAMS PATH (Vincent Phan) ----
+            // Convert (t1->t2->t3->count) into WordTriplet objects with IDs
+            List<WordTriplet> triplets = toWordTriplets(globalTrigrams, wordIds);
+            System.out.println("Prepared " + triplets.size() + " word triplets. Inserting...");
+            try {
+                db.bulkAddWordTriplets(triplets);
+                System.out.println("Inserted trigrams.");
+            } catch (SQLException ex) {
+                System.err.println("bulkAddWordTriplets failed: " + ex.getMessage());
                 ex.printStackTrace();
             }
 
@@ -208,6 +222,52 @@ public class ImporterCli {
                 wp.setFollowingWordId(nextId);
                 wp.setOccurrenceCount(nextEntry.getValue());
                 out.add(wp);
+            }
+        }
+        return out;
+    }
+
+    private static void mergeTrigrams(Map<String, Map<String, Map<String, Integer>>> target,
+                                      Map<String, Map<String, Map<String, Integer>>> src) {
+        // Loop 1: Iterate over (token1 -> map)
+        for (var e1 : src.entrySet()) {
+            String token1 = e1.getKey();
+            // Get or create the map for token1
+            Map<String, Map<String, Integer>> token2Map = target.computeIfAbsent(token1, k -> new HashMap<>());
+
+            // Loop 2: Iterate over (token2 -> map)
+            for (var e2 : e1.getValue().entrySet()) {
+                String token2 = e2.getKey();
+                // Get or create the map for (token1, token2)
+                Map<String, Integer> token3Map = token2Map.computeIfAbsent(token2, k -> new HashMap<>());
+
+                // Loop 3: Iterate over (token3 -> count) and merge
+                for (var e3 : e2.getValue().entrySet()) {
+                    token3Map.merge(e3.getKey(), e3.getValue(), Integer::sum);
+                }
+            }
+        }
+    }
+
+    private static List<WordTriplet> toWordTriplets(Map<String, Map<String, Map<String, Integer>>> trigrams,
+                                                    Map<String, Integer> wordIds) {
+        List<WordTriplet> out = new ArrayList<>();
+
+        for (var entry1 : trigrams.entrySet()) {
+            Integer id1 = wordIds.get(entry1.getKey());
+            if (id1 == null) continue; // Skip if first word isn't resolved
+
+            for (var entry2 : entry1.getValue().entrySet()) {
+                Integer id2 = wordIds.get(entry2.getKey());
+                if (id2 == null) continue; // Skip if second word isn't resolved
+
+                for (var entry3 : entry2.getValue().entrySet()) {
+                    Integer id3 = wordIds.get(entry3.getKey());
+                    if (id3 == null) continue; // Skip if third word isn't resolved
+
+                    WordTriplet triplet = new WordTriplet(id1, id2, id3, entry3.getValue());
+                    out.add(triplet);
+                }
             }
         }
         return out;

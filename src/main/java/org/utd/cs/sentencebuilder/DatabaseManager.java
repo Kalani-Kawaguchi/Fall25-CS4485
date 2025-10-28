@@ -58,7 +58,7 @@ public class DatabaseManager {
 
     public static void closeDataSource() {
         if (dataSource != null && !dataSource.isClosed()) {
-            System.out.println("Closing database connection pool.");
+            logger.info("Closing database connection pool.");
             dataSource.close();
         }
     }
@@ -173,7 +173,6 @@ public class DatabaseManager {
         Map<String, SourceFile> fileMap = new HashMap<>();
         String sql = "SELECT file_id, file_name, word_count, import_timestamp FROM source_file";
 
-        // Assumes you have a getConnect() method like in your example
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
@@ -513,6 +512,39 @@ public class DatabaseManager {
 
         logger.info("Successfully retrieved {} word pairs.", allPairs.size());
         return allPairs;
+    }
+
+    /**
+     * Inserts or updates a collection of word triplets in a single batch operation.
+     *
+     * @param wordTriplets A collection of WordTriplet objects to be added or updated.
+     * @throws SQLException if a database access error occurs.
+     */
+    public void bulkAddWordTriplets(Collection<WordTriplet> wordTriplets) throws SQLException {
+        String sql = "INSERT INTO trigram_sequence (first_word_id, second_word_id, third_word_id, follows_count) " +
+                "VALUES (?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE follows_count = follows_count + VALUES(follows_count)";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            if (wordTriplets == null || wordTriplets.isEmpty()) {
+                logger.info("Word triplets collection is empty. No action taken.");
+                return;
+            }
+
+            for (WordTriplet triplet : wordTriplets) {
+                pstmt.setInt(1, triplet.getFirstWordId());
+                pstmt.setInt(2, triplet.getSecondWordId());
+                pstmt.setInt(3, triplet.getThirdWordId());
+                pstmt.setInt(4, triplet.getOccurrenceCount());
+                pstmt.addBatch();
+            }
+
+            logger.info("Executing batch insert/update for {} word triplets.", wordTriplets.size());
+            pstmt.executeBatch();
+            logger.info("Batch execution for word triplets complete.");
+        }
     }
 
     /**
