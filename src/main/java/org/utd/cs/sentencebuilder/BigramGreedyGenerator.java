@@ -7,9 +7,10 @@
  *  Implements a greedy bigram-based sentence generation algorithm that
  *  loads word and bigram frequency data from the MySQL database.
  *
- *  - Chooses a weighted random start word based on start_sentence_count
- *  - For each word, selects the most frequent following word (greedy)
- *  - Stops after a maximum token limit or when no valid follower exists
+ *  - Loads word and bigram frequency data from the MySQL database
+ *  - Selects the most frequent following word greedily
+ *  - Supports stop words and maximum token limits
+ *  - Prevents short self-loops while allowing natural word reuse
  *
  *  Used for testing sentence generation in the RunGeneratorCli class.
  */
@@ -19,7 +20,6 @@
 
 import java.sql.*;
 import java.util.*;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Greedy bigram generator:
@@ -100,86 +100,101 @@ public class BigramGreedyGenerator implements SentenceGenerator {
 
     @Override
     public String generateSentence() {
+        return generateSentence(DEFAULT_MAX_TOKENS, null);
+    }
+
+    // previous signature with starting words; keeps behavior
+    @Override
+    public String generateSentence(List<String> startingWords) {
+        return generateSentence(startingWords, DEFAULT_MAX_TOKENS, null);
+    }
+
+    // control length & optional stop word (case-insensitive)
+    public String generateSentence(int maxTokens, String stopWord) {
         ensureLoaded();
-        // pick best start: highest start_sentence_count (fallback to most frequent word if empty)
+
         Integer startId = pickStartId();
         if (startId == null) return "";
 
-        List<Integer> ids = new ArrayList<>();
-        ids.add(startId);
-
-        int curr = startId;
-        for (int i = 1; i < DEFAULT_MAX_TOKENS; i++) {
-            List<int[]> cands = followers.get(curr);
-            if (cands == null || cands.isEmpty()) break;
-            int nextId = cands.get(0)[0]; // greedy: most frequent follower
-            ids.add(nextId);
-            curr = nextId;
-        }
-        return render(ids);
+        return buildGreedySentence(List.of(startId), maxTokens, stopWord);
     }
 
-    @Override
-    public String generateSentence(List<String> startingWords) {
+   // starting prompt + options
+    public String generateSentence(List<String> startingWords, int maxTokens, String stopWord) {
         ensureLoaded();
-        if (startingWords == null || startingWords.isEmpty()) {
-            return generateSentence();
-        }
 
-        // Use the first provided word that exists in vocab; ignore others for this bigram-only version
         Integer startId = null;
-        for (String w : startingWords) {
-            if (w == null || w.isBlank()) continue;
-            Integer id = wordToId.get(w.toLowerCase(Locale.ROOT));
-            if (id != null) { startId = id; break; }
+        if (startingWords != null) {
+            for (String w : startingWords) {
+                if (w == null || w.isBlank()) continue;
+                Integer id = wordToId.get(w.toLowerCase(Locale.ROOT));
+                if (id != null) { startId = id; break; }
+            }
         }
-        if (startId == null) {
-            // fallback to automatic starter
-            startId = pickStartId();
-            if (startId == null) return "";
-        }
+        if (startId == null) startId = pickStartId();
+        if (startId == null) return "";
 
-        List<Integer> ids = new ArrayList<>();
-        ids.add(startId);
+        return buildGreedySentence(List.of(startId), maxTokens, stopWord);
+    }
 
-        int curr = startId;
-        for (int i = 1; i < DEFAULT_MAX_TOKENS; i++) {
+    // ---------- internals ----------
+
+    private void ensureLoaded() { if (!loaded) loadData(); }
+
+    private Integer pickStartId() {
+        if (!startCandidates.isEmpty()) return startCandidates.get(0)[0];
+        return idToWord.isEmpty() ? null : idToWord.keySet().iterator().next();
+    }
+
+    private String buildGreedySentence(List<Integer> seed, int maxTokens, String stopWordRaw) {
+        final String stopWord = (stopWordRaw == null) ? null : stopWordRaw.toLowerCase(Locale.ROOT);
+
+        List<Integer> ids = new ArrayList<>(seed);
+        Set<Integer> visited = new HashSet<>(ids);  // simple loop guard
+        int curr = ids.get(ids.size() - 1);
+        Integer last = null;                        // to detect immediate backtracks
+        Set<Long> usedPairs = new HashSet<>();      // to track repeated bigrams
+
+        // main loop
+        while (ids.size() < Math.max(1, maxTokens)) {
             List<int[]> cands = followers.get(curr);
             if (cands == null || cands.isEmpty()) break;
-            int nextId = cands.get(0)[0]; // greedy
-            ids.add(nextId);
-            curr = nextId;
-        }
-        return render(ids);
-    }
 
-    // --- helpers ---
+            int nextId = -1;
+            for (int[] cand : cands) {
+                int candId = cand[0];
+                // skip if this would cause immediate backtrack (A -> B -> A)
+                if (last != null && candId == last) continue;
+                // skip if we already used this bigram once in this sentence
+                long pairKey = (((long) curr) << 32) | (candId & 0xffffffffL);
+                if (usedPairs.contains(pairKey)) continue;
 
-    private void ensureLoaded() {
-        if (!loaded) loadData();
-    }
-
-    // pick a start word, preferring words that actually start sentences in the corpus
-    private Integer pickStartId() {
-        // If we captured starters (id, startCount), pick weighted by startCount among the top K
-        if (!startCandidates.isEmpty()) {
-            // Limit to top K to avoid overweighting super-long tails
-            final int K = Math.min(50, startCandidates.size());
-
-            long total = 0;
-            for (int i = 0; i < K; i++) total += Math.max(1, startCandidates.get(i)[1]);
-
-            long r = ThreadLocalRandom.current().nextLong(1, total + 1);
-            long cum = 0;
-            for (int i = 0; i < K; i++) {
-                cum += Math.max(1, startCandidates.get(i)[1]);
-                if (r <= cum) return startCandidates.get(i)[0];
+                nextId = candId;
+                usedPairs.add(pairKey);
+                break;
             }
-            return startCandidates.get(0)[0]; // safety
+
+            // if all candidates were filtered out, stop
+            if (nextId == -1) break;
+
+            // --- loop guards ---
+            // self-loop (word -> word)
+            if (nextId == curr) break;
+         
+
+            ids.add(nextId);
+            visited.add(nextId);
+            last = curr;
+            curr = nextId;
+
+            // user stop word (match after mapping id->word)
+            if (stopWord != null) {
+                String w = idToWord.getOrDefault(curr, "").toLowerCase(Locale.ROOT);
+                if (w.equals(stopWord)) break;
+            }
         }
 
-        // Fallback: pick any word present
-        return idToWord.isEmpty() ? null : idToWord.keySet().iterator().next();
+        return render(ids);
     }
 
 
@@ -193,6 +208,11 @@ public class BigramGreedyGenerator implements SentenceGenerator {
         return sb.toString();
     }
 
+    public String generateSentenceWithStop(String stopWord) {
+        return generateSentence(DEFAULT_MAX_TOKENS, stopWord);
+    }
+
+    // NOTE: requires DatabaseManager to expose a public getConnection()
     private Connection getConnection() throws SQLException {
         return new DatabaseManager().getConnection();
     }
