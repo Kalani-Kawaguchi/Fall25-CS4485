@@ -41,6 +41,11 @@ import java.util.Map;
 
 public class Javafx extends Application {
 
+    private static DatabaseManager db; //Kevin Tran: Shared DatabaseManager instance
+    public static void setDatabaseManager(DatabaseManager databaseManager) {
+        db = databaseManager;
+    }
+
     private static final int MAX_WORDS = 1;
     private static final FileChooser fileChooser = new FileChooser();
     private static DatabaseManager db = new DatabaseManager();
@@ -112,8 +117,12 @@ public class Javafx extends Application {
             try {
                 Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
                 System.out.println("File saved");
-                String[] args = {};
-                ImporterCli.main(args);
+
+                //Kevin Tran
+                //Uses the shared DatabaseManager instance to import the file
+                boolean wordsOnly = false;
+                new ImporterCli(db).run(Path.of("data/clean"), wordsOnly);
+
             } catch (IOException e) {
                 e.printStackTrace();
             }

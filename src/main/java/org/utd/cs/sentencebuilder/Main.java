@@ -11,7 +11,10 @@ public class Main {
             // Build database if it doesn't exist
             db.buildDatabase();
 
-            Javafx.main(args);
+            //hands the shared DatabaseManager instance to Javafx
+            Javafx.setDatabaseManager(db);
+
+            Javafx.main(args); //blocks here until JavaFX application exits
         } catch (SQLException e) {
             System.err.println("❌ Database operation failed: " + e.getMessage());
             e.printStackTrace();
