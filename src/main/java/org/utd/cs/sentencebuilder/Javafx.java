@@ -48,7 +48,6 @@ public class Javafx extends Application {
 
     private static final int MAX_WORDS = 1;
     private static final FileChooser fileChooser = new FileChooser();
-    private static DatabaseManager db = new DatabaseManager();
     private static Scene homeScene;
     private static Scene historyScene;
     private static ObservableMap<String, SourceFile> importedFiles = FXCollections.observableHashMap();
@@ -176,7 +175,7 @@ public class Javafx extends Application {
     public static TableView<SourceFile> createImportTable(){
         TableView<SourceFile> importTable = new TableView<>();
 
-        // Columns
+        // Define Columns
         TableColumn<SourceFile, String> fileNameCol = new TableColumn<>("File Name");
         fileNameCol.setCellValueFactory(cellData ->
                 new ReadOnlyStringWrapper(cellData.getValue().fileName()));
@@ -203,6 +202,9 @@ public class Javafx extends Application {
             if (change.wasAdded()) {
                 items.add(change.getValueAdded());
             }
+            if (change.wasRemoved()) {
+                items.remove(change.getValueRemoved());
+            }
         });
 
         try{
@@ -212,6 +214,17 @@ public class Javafx extends Application {
             e.printStackTrace();
         }
 
+        // Updating table every 5 seconds
+        Thread refresh = getThread();
+        refresh.start();
+
+        return importTable;
+    }
+
+    // Create a thread that updates the table every 5 seconds
+    // If the new "updated" map contains a key that is not in "importedFiles", add it
+    // Files removed from the database are also removed from the table
+    private static Thread getThread() {
         Thread refresh = new Thread(() -> {
             while (true){
                 try{
@@ -230,8 +243,6 @@ public class Javafx extends Application {
             }
         });
         refresh.setDaemon(true);
-        refresh.start();
-
-        return importTable;
+        return refresh;
     }
 }
