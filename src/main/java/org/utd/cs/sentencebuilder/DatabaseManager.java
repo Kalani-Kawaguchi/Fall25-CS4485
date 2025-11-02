@@ -547,4 +547,8 @@ public class DatabaseManager {
         }
     }
 
+    public Connection getConnection() throws SQLException {
+        return getConnect();
+    }
+
 }

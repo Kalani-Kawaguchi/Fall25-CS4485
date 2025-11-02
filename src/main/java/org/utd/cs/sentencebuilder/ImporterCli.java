@@ -34,18 +34,16 @@ import java.util.stream.Collectors;
  */
 public class ImporterCli {
 
-    public static void main(String[] args) {
-        boolean wordsOnly = Arrays.asList(args).contains("--words-only");
-        Path root = Arrays.stream(args)
-                .filter(a -> !a.startsWith("--"))
-                .findFirst()
-                .map(Path::of)
-                .orElse(Path.of("data/clean"));
+    private final DatabaseManager db;
 
+    public ImporterCli(DatabaseManager db) {
+        this.db = db;
+    }
+
+    public void run(Path root, boolean wordsOnly) {
         System.out.println("Scanning: " + root.toAbsolutePath());
         System.out.println("Mode: " + (wordsOnly ? "WORDS ONLY" : "WORDS + BIGRAMS"));
 
-        DatabaseManager db = null;
         try {
             List<Path> files = listTextFiles(root);
             if (files.isEmpty()) {
@@ -53,10 +51,7 @@ public class ImporterCli {
                 return;
             }
 
-            db = new DatabaseManager();
-
-            // Vincent Phan
-            // Get SourceFiles already in db as a hashmap.
+            // Get already-imported files
             Map<String, SourceFile> importedFilesMap;
             try {
                 importedFilesMap = db.getAllSourceFiles();
@@ -64,24 +59,20 @@ public class ImporterCli {
             } catch (SQLException e) {
                 System.err.println("CRITICAL: Could not retrieve existing file list from database. Aborting.");
                 e.printStackTrace();
-                return; // Can't safely continue if this fails
+                return;
             }
-            //end
 
-            // Accumulate across ALL files (we resolve IDs once at the end)
             Map<String, Word> globalWords = new HashMap<>();
             Map<String, Map<String, Integer>> globalBigrams = new HashMap<>();
 
+            // ---- PER-FILE PASS ----
             for (Path p : files) {
                 System.out.println("\n--- Processing: " + p.getFileName() + " ---");
 
-                // Vincent Phan
                 if (importedFilesMap.containsKey(p.getFileName().toString())) {
                     System.out.println("File already imported.");
-                    continue; // Skip all processing for this file
+                    continue; // Skip this file
                 }
-                //end
-
 
                 String text = Files.readString(p);
                 Tokenizer.Result r = Tokenizer.process(text);
@@ -101,8 +92,7 @@ public class ImporterCli {
                 } catch (SQLException ex) {
                     System.err.println("addWordsInBatch failed for " + p.getFileName() + ": " + ex.getMessage());
                     ex.printStackTrace();
-                    // continue to next file
-                    continue;
+                    continue; // move to next file
                 }
 
                 // accumulate into global aggregates for one-time ID resolution
@@ -112,6 +102,7 @@ public class ImporterCli {
                 }
             }
 
+            // ---- AFTER LOOP: finalize inserts ----
             if (globalWords.isEmpty()) {
                 System.out.println("\nNothing to insert (no words collected).");
                 return;
@@ -122,7 +113,6 @@ public class ImporterCli {
                 return;
             }
 
-            // ---- BIGRAMS PATH ----
             // Resolve word IDs once across the global set
             Map<String, Integer> wordIds;
             try {
@@ -145,14 +135,29 @@ public class ImporterCli {
                 ex.printStackTrace();
             }
 
-            System.out.println("\nDone.");
         } catch (IOException e) {
             e.printStackTrace();
+        }
+    }
+
+
+    public static void main(String[] args) {
+        boolean wordsOnly = Arrays.asList(args).contains("--words-only");
+        Path root = Arrays.stream(args)
+                .filter(a -> !a.startsWith("--"))
+                .findFirst()
+                .map(Path::of)
+                .orElse(Path.of("data/clean"));
+
+        // CLI mode: create the pool once, run, then close it.
+        DatabaseManager db = new DatabaseManager();
+        try {
+            new ImporterCli(db).run(root, wordsOnly);
         } finally {
-            // always release the pool cleanly
             DatabaseManager.closeDataSource();
         }
     }
+
 
     private static List<Path> listTextFiles(Path root) throws IOException {
         if (!Files.exists(root)) return List.of();
