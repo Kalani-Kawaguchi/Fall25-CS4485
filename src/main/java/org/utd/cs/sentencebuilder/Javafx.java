@@ -23,9 +23,12 @@ import javafx.collections.ObservableMap;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.input.Dragboard;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.text.TextAlignment;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
@@ -102,6 +105,23 @@ public class Javafx extends Application {
         return output;
     }
 
+    private static void importFile(File file){
+        Path dest = Path.of("data/clean", file.getName());
+
+        try {
+            Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
+            System.out.println("File saved");
+
+            //Kevin Tran
+            //Uses the shared DatabaseManager instance to import the file
+            boolean wordsOnly = false;
+            new ImporterCli(db).run(dest, wordsOnly);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     public static void selectFile(Stage stage){
         fileChooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("Text Files", "*.txt")
@@ -111,31 +131,70 @@ public class Javafx extends Application {
         File file = fileChooser.showOpenDialog(stage);
 
         if (file != null) {
-            Path dest = Path.of("data/clean", file.getName());
-
-            try {
-                Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
-                System.out.println("File saved");
-
-                //Kevin Tran
-                //Uses the shared DatabaseManager instance to import the file
-                boolean wordsOnly = false;
-                new ImporterCli(db).run(Path.of("data/clean"), wordsOnly);
-
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            importFile(file);
         } else {
             System.out.println("No file");
         }
     }
 
-    public static void createHomeScene(Stage stage){
-        // Upload File Row
+    public static Button createUploadButton(Stage stage) {
         Button uploadButton = new Button("Upload a Text FIle");
         uploadButton.setOnAction(actionEvent -> {
             selectFile(stage);
         });
+
+        return uploadButton;
+    }
+
+    public static VBox createDropBox(Stage stage) {
+        // Setup Drag and Drop Box and Label
+        VBox dropBox = new VBox();
+        dropBox.setMaxWidth(480);
+        dropBox.setMinHeight(60);
+        dropBox.setAlignment(Pos.CENTER);
+        dropBox.setStyle("-fx-border-style: dashed; -fx-border-radius: 8;");
+        Label text = new Label("Drag & Drop File\nor\nClick to Upload");
+        text.setTextAlignment(TextAlignment.CENTER);
+        dropBox.getChildren().add(text);
+
+        dropBox.setOnDragOver(dragEvent -> {
+            if (dragEvent.getGestureSource() != dropBox && dragEvent.getDragboard().hasFiles()){
+                dragEvent.acceptTransferModes(TransferMode.COPY_OR_MOVE);
+            }
+            dragEvent.consume();
+        });
+
+        dropBox.setOnDragDropped(dropEvent -> {
+            Dragboard dragboard = dropEvent.getDragboard();
+            boolean success = false;
+            if(dragboard.hasFiles()) {
+                File f = dragboard.getFiles().get(0);
+
+                if (f.getName().toLowerCase().endsWith(".txt")){
+                    importFile(f);
+                }else{
+                    Alert alert = new Alert(Alert.AlertType.WARNING);
+                    alert.setTitle("Invalid File Type");
+                    alert.setContentText("Only .txt files are allowed");
+                    alert.show();
+                }
+
+                success = true;
+            }
+            dropEvent.setDropCompleted(success);
+            dropEvent.consume();
+        });
+
+        // Still allow for click to upload functionality
+        dropBox.setOnMouseClicked(actionEvent -> {
+            selectFile(stage);
+        });
+        return dropBox;
+    }
+
+    public static void createHomeScene(Stage stage){
+        // Upload File Row
+        VBox dropBox = createDropBox(stage);
 
         // Input Row
         VBox inputRow = inputRow();
@@ -148,7 +207,7 @@ public class Javafx extends Application {
         toScene2Button.setOnAction(e -> stage.setScene(historyScene));
 
         // Main
-        VBox root = new VBox(20, uploadButton, inputRow, output, toScene2Button);
+        VBox root = new VBox(20, dropBox, inputRow, output, toScene2Button);
         root.setAlignment(Pos.CENTER);
 
         StackPane container = new StackPane(root);
