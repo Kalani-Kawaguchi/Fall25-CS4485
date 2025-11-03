@@ -3,305 +3,299 @@
  * CS4485 - Fall 2025 - Sentence Builder Project
  *
  * Author: Kalani Kawaguchi
- * Date: October 6, 2025
+ * Date: October 6 2025
+ *
+ * Author: Taha Zaidi
+ * Date: November 2 2025
  *
  * Description:
- * Simple UI with some placeholders.
- * Upload file button allows users to upload .txt files to be saved to the
- * data folder. Uploaded file will then be imported to the DB
+ * JavaFX UI for the Sentence Builder project.
  */
+
 package org.utd.cs.sentencebuilder;
 
 import javafx.application.Application;
-import javafx.application.Platform;
-import javafx.beans.property.ReadOnlyObjectWrapper;
-import javafx.beans.property.ReadOnlyStringWrapper;
-import javafx.collections.FXCollections;
-import javafx.collections.MapChangeListener;
-import javafx.collections.ObservableList;
-import javafx.collections.ObservableMap;
+import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
-import javafx.scene.input.Dragboard;
-import javafx.scene.input.TransferMode;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.StackPane;
-import javafx.scene.layout.VBox;
-import javafx.scene.text.TextAlignment;
+import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
-
-import javax.xml.transform.Source;
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.sql.SQLException;
-import java.sql.Timestamp;
-import java.util.Map;
+import java.io.*;
+import java.nio.file.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 
 public class Javafx extends Application {
+    private static final int MAX_WORDS = 1;
+    private static final FileChooser fileChooser = new FileChooser();
+    private final Label statusLabel = new Label();
 
-    private static DatabaseManager db; //Kevin Tran: Shared DatabaseManager instance
+    // Kevin Tran: Shared DatabaseManager instance
+    private static DatabaseManager db;
     public static void setDatabaseManager(DatabaseManager databaseManager) {
         db = databaseManager;
     }
 
-    private static final int MAX_WORDS = 1;
-    private static final FileChooser fileChooser = new FileChooser();
-    private static Scene homeScene;
-    private static Scene historyScene;
-    private static ObservableMap<String, SourceFile> importedFiles = FXCollections.observableHashMap();
+    // upload history data structure
+    private static class UploadEntry {
+        String fileName;
+        long wordCount;
+        String importTime;
 
-    @Override
-    public void start(Stage stage) {
-
-        // Home Scene
-        createHomeScene(stage);
-
-        // Scene 2
-        createHistoryScene(stage);
-
-        stage.setScene(homeScene);
-        stage.setTitle("Sentence Builder");
-        stage.show();
-    }
-
-    public static void main(String[] args) {
-        launch();
-    }
-
-    public static VBox inputRow(){
-        Label label = new Label("Enter a Starting Word:");
-        TextField textField = new TextField();
-        textField.setPrefWidth(150);
-        textField.textProperty().addListener((observableValue, oldValue, newValue) -> {
-            String[] words = newValue.trim().split("\\s+");
-            if (words.length > MAX_WORDS){
-                textField.setText(words[0]);
-            }
-        });
-
-        HBox inputFields = new HBox(10, label, textField);
-        inputFields.setAlignment(Pos.CENTER);
-
-        Button button = new Button("Submit");
-
-        VBox inputRow = new VBox(5, inputFields, button);
-        inputRow.setAlignment(Pos.CENTER);
-
-        return inputRow;
-    }
-
-    public static TextArea outputRow(){
-        TextArea output = new TextArea("Lorem ipsum dolor sit amet, consectetur");
-        output.setEditable(false);
-        output.setWrapText(true);
-        output.setMaxWidth(300);
-        output.setPrefHeight(300);
-        
-        return output;
-    }
-
-    private static void importFile(File file){
-        Path dest = Path.of("data/clean", file.getName());
-
-        try {
-            Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
-            System.out.println("File saved");
-
-            //Kevin Tran
-            //Uses the shared DatabaseManager instance to import the file
-            boolean wordsOnly = false;
-            new ImporterCli(db).run(dest, wordsOnly);
-
-        } catch (IOException e) {
-            e.printStackTrace();
+        UploadEntry(String fileName, long wordCount, String importTime) {
+            this.fileName = fileName;
+            this.wordCount = wordCount;
+            this.importTime = importTime;
         }
     }
 
-    public static void selectFile(Stage stage){
+    private final List<UploadEntry> uploadHistory = new ArrayList<>();
+    private Scene mainScene;
+    private Scene historyScene;
+
+    // application entry
+    @Override
+    public void start(Stage stage) {
+        stage.setTitle("Sentence Builder Project");
+
+        // initialize both UI scenes
+        mainScene = buildMainScene(stage);
+        historyScene = buildHistoryScene(stage);
+
+        stage.setScene(mainScene);
+        stage.show();
+    }
+
+    // main scene which includes the upload and generation
+    private Scene buildMainScene(Stage stage) {
+        // upload section
+        Label uploadTitle = new Label("Upload Text File");
+        uploadTitle.setStyle(
+                "-fx-font-family: 'Helvetica'; " +
+                        "-fx-font-weight: bold; " +
+                        "-fx-font-size: 16px; " +
+                        "-fx-text-fill: #333333;"
+        );
+
+        Button uploadButton = new Button("Click to upload a .txt file");
+        uploadButton.setOnAction(actionEvent -> selectFile(stage));
+        uploadButton.setStyle(
+                "-fx-background-color: transparent;" +
+                        "-fx-border-color: #cfcfcf;" +
+                        "-fx-border-style: dashed;" +
+                        "-fx-border-radius: 12;" +
+                        "-fx-background-radius: 12;" +
+                        "-fx-text-fill: #6b7580;" +
+                        "-fx-font-size: 16px;" +
+                        "-fx-padding: 50 100 50 100;"
+        );
+
+        VBox uploadBox = new VBox(8, uploadTitle, uploadButton, statusLabel);
+        uploadBox.setAlignment(Pos.CENTER);
+
+        // sentence input section
+        Label startLabel = new Label("Starting Word");
+        startLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
+
+        TextField startInput = new TextField();
+        startInput.setPromptText("Enter a word to begin...");
+        startInput.setPrefWidth(180);
+        startInput.setStyle(
+                "-fx-background-radius: 10;" +
+                        "-fx-border-radius: 10;" +
+                        "-fx-border-color: #d8dfe3;" +
+                        "-fx-padding: 10 12 10 12;" +
+                        "-fx-font-size: 13px;"
+        );
+
+        startInput.textProperty().addListener((observableValue, oldValue, newValue) -> {
+            String[] words = newValue.trim().split("\\s+");
+            if (words.length > MAX_WORDS) startInput.setText(words[0]);
+        });
+
+        // algorithm dropdown selection
+        Label algoLabel = new Label("Algorithm");
+        algoLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
+
+        ComboBox<String> algoDropdown = new ComboBox<>();
+        algoDropdown.getItems().addAll("Greedy");
+        algoDropdown.setValue("Greedy");
+        algoDropdown.setPrefWidth(180);
+
+        HBox inputRow = new HBox(25, new VBox(5, startLabel, startInput), new VBox(5, algoLabel, algoDropdown));
+        inputRow.setAlignment(Pos.CENTER);
+
+        // generation and history buttons
+        Button generateButton = new Button("Generate Sentence");
+        generateButton.setStyle(
+                "-fx-background-color: #9bb0bb;" +
+                        "-fx-text-fill: white;" +
+                        "-fx-font-weight: bold;" +
+                        "-fx-font-size: 13px;" +
+                        "-fx-background-radius: 10;" +
+                        "-fx-pref-width: 400;"
+        );
+
+        Button historyButton = new Button("View Upload History");
+        historyButton.setOnAction(e -> stage.setScene(historyScene));
+        historyButton.setStyle(
+                "-fx-background-color: #ffffff;" +
+                        "-fx-text-fill: #4a4f57;" +
+                        "-fx-font-weight: bold;" +
+                        "-fx-font-size: 13px;" +
+                        "-fx-background-radius: 10;" +
+                        "-fx-border-radius: 10;" +
+                        "-fx-border-color: #d8dfe3;" +
+                        "-fx-pref-width: 400;"
+        );
+
+        // sentence output section
+        Label outputLabel = new Label("Generated Sentence");
+        outputLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
+
+        TextArea output = new TextArea("Your generated sentence will appear here...");
+        output.setEditable(false);
+        output.setWrapText(true);
+        output.setPrefWidth(400);
+        output.setPrefHeight(100);
+        output.setStyle(
+                "-fx-font-style: italic;" +
+                        "-fx-text-fill: #4f5b4f;" +
+                        "-fx-font-size: 13px;" +
+                        "-fx-control-inner-background: #e4eddc;"
+        );
+
+        // card layout
+        VBox card = new VBox(20, uploadBox, inputRow, generateButton, historyButton, new VBox(8, outputLabel, output));
+        card.setAlignment(Pos.CENTER);
+        card.setPadding(new Insets(30));
+        card.setStyle(
+                "-fx-background-color: #ffffff;" +
+                        "-fx-background-radius: 20;" +
+                        "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.1), 10, 0, 0, 4);"
+        );
+
+        StackPane container = new StackPane(card);
+        container.setAlignment(Pos.CENTER);
+        container.setStyle("-fx-background-color: #f8fafb;");
+
+        return new Scene(container, 600, 650);
+    }
+
+    // history scene of the upload records
+    private Scene buildHistoryScene(Stage stage) {
+        Label title = new Label("Upload History");
+        title.setStyle("-fx-font-weight: bold; -fx-font-size: 18px; -fx-text-fill: #333333;");
+
+        TableView<UploadEntry> tableView = new TableView<>();
+        tableView.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+        TableColumn<UploadEntry, String> nameCol = new TableColumn<>("File Name");
+        nameCol.setCellValueFactory(data -> new javafx.beans.property.SimpleStringProperty(data.getValue().fileName));
+
+        TableColumn<UploadEntry, String> wordCol = new TableColumn<>("Word Count");
+        wordCol.setCellValueFactory(data -> new javafx.beans.property.SimpleStringProperty(String.valueOf(data.getValue().wordCount)));
+
+        TableColumn<UploadEntry, String> timeCol = new TableColumn<>("Import Time");
+        timeCol.setCellValueFactory(data -> new javafx.beans.property.SimpleStringProperty(data.getValue().importTime));
+
+        tableView.getColumns().addAll(nameCol, wordCol, timeCol);
+
+        // back button on history scene
+        Button backButton = new Button("← Back");
+        backButton.setOnAction(e -> stage.setScene(mainScene));
+        backButton.setStyle(
+                "-fx-background-color: #9bb0bb;" +
+                        "-fx-text-fill: white;" +
+                        "-fx-font-weight: bold;" +
+                        "-fx-font-size: 13px;" +
+                        "-fx-background-radius: 8;"
+        );
+
+        VBox layout = new VBox(20, title, tableView, backButton);
+        layout.setAlignment(Pos.CENTER);
+        layout.setPadding(new Insets(30));
+        layout.setStyle(
+                "-fx-background-color: #ffffff;" +
+                        "-fx-background-radius: 20;"
+        );
+
+        StackPane container = new StackPane(layout);
+        container.setStyle("-fx-background-color: #f8fafb;");
+
+        Scene scene = new Scene(container, 600, 650);
+
+        // refresh the table when switched to this scene
+        scene.windowProperty().addListener((obs, oldWin, newWin) -> {
+            if (newWin != null) {
+                tableView.getItems().setAll(uploadHistory);
+            }
+        });
+
+        return scene;
+    }
+
+    // file upload logic
+    public void selectFile(Stage stage) {
+        fileChooser.getExtensionFilters().clear();
         fileChooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("Text Files", "*.txt")
         );
 
-        fileChooser.setTitle("Upload a .txt file");
         File file = fileChooser.showOpenDialog(stage);
 
         if (file != null) {
-            importFile(file);
-        } else {
-            System.out.println("No file");
-        }
-    }
+            Alert confirmDialog = new Alert(Alert.AlertType.CONFIRMATION);
+            confirmDialog.setTitle("Confirm Upload");
+            confirmDialog.setHeaderText("Are you sure you want to upload this file?");
+            confirmDialog.setContentText("File: " + file.getName() + "\nSize: " + file.length() / 1024 + " KB");
 
-    public static Button createUploadButton(Stage stage) {
-        Button uploadButton = new Button("Upload a Text FIle");
-        uploadButton.setOnAction(actionEvent -> {
-            selectFile(stage);
-        });
+            Optional<ButtonType> result = confirmDialog.showAndWait();
+            if (result.isPresent() && result.get() == ButtonType.OK) {
+                try {
+                    Path dest = Path.of("data/clean", file.getName());
+                    Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
 
-        return uploadButton;
-    }
+                    long wordCount = countWordsInFile(file);
+                    String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
 
-    public static VBox createDropBox(Stage stage) {
-        // Setup Drag and Drop Box and Label
-        VBox dropBox = new VBox();
-        dropBox.setMaxWidth(480);
-        dropBox.setMinHeight(60);
-        dropBox.setAlignment(Pos.CENTER);
-        dropBox.setStyle("-fx-border-style: dashed; -fx-border-radius: 8;");
-        Label text = new Label("Drag & Drop File\nor\nClick to Upload");
-        text.setTextAlignment(TextAlignment.CENTER);
-        dropBox.getChildren().add(text);
+                    uploadHistory.add(new UploadEntry(file.getName(), wordCount, timestamp));
 
-        dropBox.setOnDragOver(dragEvent -> {
-            if (dragEvent.getGestureSource() != dropBox && dragEvent.getDragboard().hasFiles()){
-                dragEvent.acceptTransferModes(TransferMode.COPY_OR_MOVE);
-            }
-            dragEvent.consume();
-        });
+                    // Kevin Tran - Import into Database
+                    boolean wordsOnly = false;
+                    new ImporterCli(db).run(dest, wordsOnly);
 
-        dropBox.setOnDragDropped(dropEvent -> {
-            Dragboard dragboard = dropEvent.getDragboard();
-            boolean success = false;
-            if(dragboard.hasFiles()) {
-                File f = dragboard.getFiles().get(0);
-
-                if (f.getName().toLowerCase().endsWith(".txt")){
-                    importFile(f);
-                }else{
-                    Alert alert = new Alert(Alert.AlertType.WARNING);
-                    alert.setTitle("Invalid File Type");
-                    alert.setContentText("Only .txt files are allowed");
-                    alert.show();
-                }
-
-                success = true;
-            }
-            dropEvent.setDropCompleted(success);
-            dropEvent.consume();
-        });
-
-        // Still allow for click to upload functionality
-        dropBox.setOnMouseClicked(actionEvent -> {
-            selectFile(stage);
-        });
-        return dropBox;
-    }
-
-    public static void createHomeScene(Stage stage){
-        // Upload File Row
-        VBox dropBox = createDropBox(stage);
-
-        // Input Row
-        VBox inputRow = inputRow();
-
-        // Output Row
-        TextArea output = outputRow();
-
-        // Swap Scene Button
-        Button toScene2Button = new Button("To Upload History");
-        toScene2Button.setOnAction(e -> stage.setScene(historyScene));
-
-        // Main
-        VBox root = new VBox(20, dropBox, inputRow, output, toScene2Button);
-        root.setAlignment(Pos.CENTER);
-
-        StackPane container = new StackPane(root);
-        container.setAlignment(Pos.CENTER);
-
-        homeScene = new Scene(container, 640, 480);
-    }
-
-    public static void createHistoryScene(Stage stage){
-        TableView<SourceFile> importTable = createImportTable();
-
-        Button toHomeSceneButton = new Button("To Sentence Builder");
-        toHomeSceneButton.setOnAction(e -> stage.setScene(homeScene));
-
-        VBox root = new VBox(20, importTable, toHomeSceneButton);
-        root.setAlignment(Pos.CENTER);
-
-        StackPane container = new StackPane(root);
-        container.setAlignment(Pos.CENTER);
-
-        historyScene = new Scene(container, 640, 480);
-    }
-
-    public static TableView<SourceFile> createImportTable(){
-        TableView<SourceFile> importTable = new TableView<>();
-
-        // Define Columns
-        TableColumn<SourceFile, String> fileNameCol = new TableColumn<>("File Name");
-        fileNameCol.setCellValueFactory(cellData ->
-                new ReadOnlyStringWrapper(cellData.getValue().fileName()));
-
-        TableColumn<SourceFile, Integer> wordCountCol = new TableColumn<>("Word Count");
-        wordCountCol.setCellValueFactory(cellData ->
-                new ReadOnlyObjectWrapper<>(cellData.getValue().wordCount()));
-
-        TableColumn<SourceFile, Timestamp> timestampCol = new TableColumn<>("Import Time");
-        timestampCol.setCellValueFactory(cellData ->
-                new ReadOnlyObjectWrapper<>(cellData.getValue().importTimestamp()));
-
-        importTable.getColumns().addAll(fileNameCol, wordCountCol, timestampCol);
-        importTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_ALL_COLUMNS);
-
-        timestampCol.setSortType(TableColumn.SortType.DESCENDING);
-        importTable.getSortOrder().add(timestampCol);
-        importTable.sort();
-
-        ObservableList<SourceFile> items = FXCollections.observableArrayList();
-        importTable.setItems(items);
-
-        importedFiles.addListener((MapChangeListener<String, SourceFile>) change -> {
-            if (change.wasAdded()) {
-                items.add(change.getValueAdded());
-            }
-            if (change.wasRemoved()) {
-                items.remove(change.getValueRemoved());
-            }
-        });
-
-        try{
-            Map<String, SourceFile> dbFiles = db.getAllSourceFiles();
-            importedFiles.putAll(dbFiles);
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-
-        // Updating table every 5 seconds
-        Thread refresh = getThread();
-        refresh.start();
-
-        return importTable;
-    }
-
-    // Create a thread that updates the table every 5 seconds
-    // If the new "updated" map contains a key that is not in "importedFiles", add it
-    // Files removed from the database are also removed from the table
-    private static Thread getThread() {
-        Thread refresh = new Thread(() -> {
-            while (true){
-                try{
-                    Thread.sleep(5000);
-                    Map<String, SourceFile> updated = db.getAllSourceFiles();
-                    Platform.runLater(() -> {
-                        for (String key : updated.keySet()){
-                            if(!importedFiles.containsKey(key)){
-                                importedFiles.put(key, updated.get(key));
-                            }
-                        }
-                    });
-                } catch (Exception e) {
+                    statusLabel.setText("✅ Uploaded: " + file.getName() + " (" + wordCount + " words, " + timestamp + ")");
+                } catch (IOException e) {
                     e.printStackTrace();
+                    statusLabel.setText("❌ Error uploading file.");
                 }
+            } else {
+                statusLabel.setText("Upload cancelled.");
             }
-        });
-        refresh.setDaemon(true);
-        return refresh;
+        } else {
+            statusLabel.setText("No file selected.");
+        }
+    }
+
+    // word count in file
+    private long countWordsInFile(File file) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            return reader.lines()
+                    .flatMap(line -> Arrays.stream(line.trim().split("\\s+")))
+                    .filter(word -> !word.isEmpty())
+                    .count();
+        } catch (IOException e) {
+            e.printStackTrace();
+            return 0;
+        }
+    }
+
+    // main
+    public static void main(String[] args) {
+        launch();
     }
 }
