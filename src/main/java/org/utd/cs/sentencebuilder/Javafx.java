@@ -48,7 +48,7 @@ public class Javafx extends Application {
 
     private static final int MAX_WORDS = 1;
     private static final FileChooser fileChooser = new FileChooser();
-    private static DatabaseManager db = new DatabaseManager();
+    //private static DatabaseManager db = new DatabaseManager();
     private static Scene homeScene;
     private static Scene historyScene;
     private static ObservableMap<String, SourceFile> importedFiles = FXCollections.observableHashMap();

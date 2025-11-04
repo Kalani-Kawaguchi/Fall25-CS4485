@@ -58,7 +58,7 @@ public class DatabaseManager {
 
     public static void closeDataSource() {
         if (dataSource != null && !dataSource.isClosed()) {
-            System.out.println("Closing database connection pool.");
+            logger.info("Closing database connection pool.");
             dataSource.close();
         }
     }
@@ -68,6 +68,9 @@ public class DatabaseManager {
     }
 
 
+    public Connection getConnection() throws SQLException {
+        return getConnect();
+    }
 
     /**
      * Creates the database schema.
@@ -97,6 +100,7 @@ public class DatabaseManager {
                 "preceding_word_id INT NOT NULL," +
                 "following_word_id INT NOT NULL," +
                 "occurrence_count INT DEFAULT 1 NOT NULL," +
+                //"bi_end_frequency INT DEFAULT 0 NOT NULL," +
                 "FOREIGN KEY (preceding_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (following_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "UNIQUE KEY unique_pair (preceding_word_id, following_word_id)" +
@@ -109,6 +113,7 @@ public class DatabaseManager {
                 "second_word_id INT NOT NULL," +
                 "third_word_id INT NOT NULL," +
                 "follows_count INT DEFAULT 1 NOT NULL," +
+                //"tri_end_frequency INT DEFAULT 0 NOT NULL," +
                 "FOREIGN KEY (first_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (second_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (third_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
@@ -516,6 +521,39 @@ public class DatabaseManager {
     }
 
     /**
+     * Inserts or updates a collection of word triplets in a single batch operation.
+     *
+     * @param wordTriplets A collection of WordTriplet objects to be added or updated.
+     * @throws SQLException if a database access error occurs.
+     */
+    public void bulkAddWordTriplets(Collection<WordTriplet> wordTriplets) throws SQLException {
+        String sql = "INSERT INTO trigram_sequence (first_word_id, second_word_id, third_word_id, follows_count) " +
+                "VALUES (?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE follows_count = follows_count + VALUES(follows_count)";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            if (wordTriplets == null || wordTriplets.isEmpty()) {
+                logger.info("Word triplets collection is empty. No action taken.");
+                return;
+            }
+
+            for (WordTriplet triplet : wordTriplets) {
+                pstmt.setInt(1, triplet.getFirstWordId());
+                pstmt.setInt(2, triplet.getSecondWordId());
+                pstmt.setInt(3, triplet.getThirdWordId());
+                pstmt.setInt(4, triplet.getOccurrenceCount());
+                pstmt.addBatch();
+            }
+
+            logger.info("Executing batch insert/update for {} word triplets.", wordTriplets.size());
+            pstmt.executeBatch();
+            logger.info("Batch execution for word triplets complete.");
+        }
+    }
+
+    /**
      * Deletes all data from all tables in the database.
      * This is a destructive operation.
      * Resets auto-increment counters.
@@ -546,9 +584,4 @@ public class DatabaseManager {
             }
         }
     }
-
-    public Connection getConnection() throws SQLException {
-        return getConnect();
-    }
-
 }

@@ -2,7 +2,7 @@
  * Tokenizer.java
  * CS4485 - Fall 2025 - Sentence Builder Project
  *
- * Author: Kevin Tran
+ * Author: Kevin Tran & Vincent Phan
  * Date: October 3 2025
  *
  * Description:
@@ -18,18 +18,31 @@ package org.utd.cs.sentencebuilder;
 
 import java.nio.file.*;
 import java.io.IOException;
+import java.text.BreakIterator;
 import java.util.*;
 import java.util.regex.Pattern;
 
 public class Tokenizer {
 
+    //only used by depecrated function.
     private static final Pattern EDGE_PUNCT = Pattern.compile("^[^\\p{L}\\p{Nd}']+|[^\\p{L}\\p{Nd}']+$");
+
+    private static final Pattern SENTENCE_SPLIT = Pattern.compile("(?<=[.!?])\\s+");
 
     public static class Result {
         /** Word string -> Word object (with total/start/end counts). */
         public final Map<String, Word> words = new HashMap<>();
-        /** Bigram counts: prevWord -> (nextWord -> count). */
-        public final Map<String, Map<String, Integer>> bigramCounts = new HashMap<>();
+        /** Counts: n-gram -> count. */
+        Map<String, Integer> bigramCounts = new HashMap<>();    // "w1 w2" -> count
+        Map<String, Integer> trigramCounts = new HashMap<>();   // "w1 w2 w3" -> count
+
+        /** Histogram: sentence length (#tokens) -> count. */
+        public final Map<Integer, Integer> sentenceLengthCounts = new HashMap<>();
+
+        /** Bigram/trigram end-of-sentence counts. */
+        public final Map<String, Integer> bigramEndCounts = new HashMap<>();
+        public final Map<String, Integer> trigramEndCounts = new HashMap<>();
+
         /** Flat list of tokens (mostly for debugging/printing). */
         public final List<String> tokens = new ArrayList<>();
     }
@@ -39,55 +52,86 @@ public class Tokenizer {
         return process(text);
     }
 
-public static Result process(String text) {
+    public static Result process(String text) {
         Result r = new Result();
 
-        // 1) tokenize into normalized tokens
-        String[] raw = text.split("\\s+");
-        for (String t : raw) {
-            if (t == null || t.isBlank()) continue;
-            String cleaned = EDGE_PUNCT.matcher(t).replaceAll("");
-            if (cleaned.isEmpty()) continue;
-            String w = cleaned.toLowerCase(Locale.ROOT);
-            r.tokens.add(w);
-        }
+        BreakIterator iterator = BreakIterator.getSentenceInstance(Locale.US);
+        iterator.setText(text);
 
-        if (r.tokens.isEmpty()) return r;
+        int start = iterator.first();
+        for (int end = iterator.next(); end != BreakIterator.DONE; start = end, end = iterator.next()) {
+            String sentence = text.substring(start, end).trim();
+            if (sentence.isEmpty()) continue;
 
-        // 2) unigram counts using Word objects
-        //    Word has fields: wordValue, totalOccurrences, startSentenceCount, endSequenceCount
-        //    We’ll bump total for every token. For now (no robust sentence split),
-        //    we’ll approximate sentence boundaries with simple punctuation check on the raw text later if needed.
-        for (int i = 0; i < r.tokens.size(); i++) {
-            String w = r.tokens.get(i);
-            Word obj = r.words.get(w);
-            if (obj == null) {
-                obj = new Word();
-                obj.setWordValue(w);
-                obj.setTotalOccurrences(0);
-                obj.setStartSentenceCount(0);
-                obj.setEndSequenceCount(0);
-                r.words.put(w, obj);
+            List<String> toks = tokenizeSentence(sentence);
+            if (toks.isEmpty()) continue;
+
+            r.tokens.addAll(toks);
+
+            int len = toks.size();
+            r.sentenceLengthCounts.merge(len, 1, Integer::sum);
+
+            //kevin
+            for (int i = 0; i < toks.size(); i++) {
+                String w = toks.get(i);
+                Word obj = r.words.computeIfAbsent(w, k -> {
+                    Word nw = new Word();
+                    nw.setWordValue(k);
+                    nw.setTotalOccurrences(0);
+                    nw.setStartSentenceCount(0);
+                    nw.setEndSequenceCount(0);
+                    return nw;
+                });
+                obj.setTotalOccurrences(obj.getTotalOccurrences() + 1);
+                if (i == 0) obj.setStartSentenceCount(obj.getStartSentenceCount() + 1);
+                if (i == toks.size() - 1)
+                    obj.setEndSequenceCount(obj.getEndSequenceCount() + 1);
             }
-            obj.setTotalOccurrences(obj.getTotalOccurrences() + 1);
+            //kevin & vincent
+            for (int i = 0; i < toks.size(); i++) {
+                String w1 = toks.get(i);
+                //bigram&trigram logic
+                if (i + 1 < toks.size()) {
+                    String w2 = toks.get(i + 1);
+                    String bigramKey = w1 + " " + w2;
+                    r.bigramCounts.merge(bigramKey, 1, Integer::sum);
+
+                    // End-of-sentence bigram
+                    if (i + 2 == toks.size()) {
+                        r.bigramEndCounts.merge(bigramKey, 1, Integer::sum);
+                    }
+
+                    //trigram
+                    if (i + 2 < toks.size()) {
+                        String w3 = toks.get(i + 2);
+                        String trigramKey = w1 + " " + w2 + " " + w3;
+
+                        r.trigramCounts.merge(trigramKey, 1, Integer::sum);
+
+                        // End-of-sentence trigram
+                        if (i + 3 == toks.size()) {
+                            r.trigramEndCounts.merge(trigramKey, 1, Integer::sum);
+                        }
+                    }
+                }
+            }
         }
-
-        // Optional: VERY simple sentence boundary approximation (can upgrade later):
-        // treat '.', '!', '?' in original string as boundaries and bump start/end counters
-        markSentenceStartsAndEnds(r.words, text);
-
-        // 3) bigram counts (string-string for now)
-        for (int i = 0; i + 1 < r.tokens.size(); i++) {
-            String prev = r.tokens.get(i);
-            String next = r.tokens.get(i + 1);
-            r.bigramCounts
-                    .computeIfAbsent(prev, k -> new HashMap<>())
-                    .merge(next, 1, Integer::sum);
-        }
-
         return r;
     }
 
+    /** Tokenize a single sentence (clean punctuation, lowercase). */
+    private static List<String> tokenizeSentence(String sent) {
+        List<String> toks = new ArrayList<>();
+        for (String raw : sent.split("\\s+")) {
+            if (raw == null || raw.isBlank()) continue;
+            String cleaned = EDGE_PUNCT.matcher(raw).replaceAll("");
+            if (cleaned.isEmpty()) continue;
+            toks.add(cleaned.toLowerCase(Locale.ROOT));
+        }
+        return toks;
+    }
+
+    // deprecated but keeping around just in case?
     /** Naive sentence boundary marking: split on ., !, ? (keeps it simple for v1). */
     private static void markSentenceStartsAndEnds(Map<String, Word> wordMap, String fullText) {
         // Split on punctuation followed by whitespace. Then increment start/end counts on first/last token of each segment.

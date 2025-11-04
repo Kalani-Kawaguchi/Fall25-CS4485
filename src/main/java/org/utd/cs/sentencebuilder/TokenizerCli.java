@@ -35,7 +35,8 @@ public class TokenizerCli {
         for (Entry<String,Integer> e : top) {
             System.out.println(e.getKey() + " : " + e.getValue());
         }
-
+        //to lazy to fix -vincent
+        /**
         String probe = "the";
         System.out.println("\nTop followers of '" + probe + "':");
         Map<String,Integer> row = res.bigramCounts.getOrDefault(probe, Map.of());
@@ -43,6 +44,7 @@ public class TokenizerCli {
            .sorted((a,b)->Integer.compare(b.getValue(), a.getValue()))
            .limit(10)
            .forEach(e -> System.out.println(probe + " -> " + e.getKey() + " : " + e.getValue()));
+        **/
 
         // Show one Word object to confirm fields are set
         res.words.entrySet().stream().limit(1).forEach(e -> {

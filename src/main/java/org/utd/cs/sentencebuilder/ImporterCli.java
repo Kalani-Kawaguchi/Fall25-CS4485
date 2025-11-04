@@ -63,7 +63,8 @@ public class ImporterCli {
             }
 
             Map<String, Word> globalWords = new HashMap<>();
-            Map<String, Map<String, Integer>> globalBigrams = new HashMap<>();
+            Map<String, Integer> globalBigrams = new HashMap<>();
+            Map<String, Integer> globalTrigrams = new HashMap<>();
 
             // ---- PER-FILE PASS ----
             for (Path p : files) {
@@ -98,7 +99,8 @@ public class ImporterCli {
                 // accumulate into global aggregates for one-time ID resolution
                 mergeWords(globalWords, r.words);
                 if (!wordsOnly) {
-                    mergeBigrams(globalBigrams, r.bigramCounts);
+                    mergeCounts(globalBigrams, r.bigramCounts);
+                    mergeCounts(globalTrigrams, r.trigramCounts);
                 }
             }
 
@@ -124,7 +126,6 @@ public class ImporterCli {
                 return;
             }
 
-            // Convert (prev->next->count) into WordPair objects with IDs and insert
             List<WordPair> pairs = toWordPairs(globalBigrams, wordIds);
             System.out.println("Prepared " + pairs.size() + " word pairs. Inserting...");
             try {
@@ -132,6 +133,16 @@ public class ImporterCli {
                 System.out.println("Inserted bigrams.");
             } catch (SQLException ex) {
                 System.err.println("bulkAddWordPairs failed: " + ex.getMessage());
+                ex.printStackTrace();
+            }
+
+            List<WordTriplet> triplets = toWordTriplets(globalTrigrams, wordIds);
+            System.out.println("Prepared " + pairs.size() + " word triplets. Inserting...");
+            try {
+                db.bulkAddWordTriplets(triplets);
+                System.out.println("Inserted Trigrams.");
+            } catch (SQLException ex) {
+                System.err.println("bulkAddWordTrigrams failed: " + ex.getMessage());
                 ex.printStackTrace();
             }
 
@@ -188,33 +199,56 @@ public class ImporterCli {
         }
     }
 
-    private static void mergeBigrams(Map<String, Map<String,Integer>> target,
-                                     Map<String, Map<String,Integer>> src) {
+    private static void mergeCounts(Map<String,Integer> target, Map<String,Integer> src) {
         for (var e : src.entrySet()) {
-            String prev = e.getKey();
-            Map<String,Integer> intoRow = target.computeIfAbsent(prev, k -> new HashMap<>());
-            for (var n : e.getValue().entrySet()) {
-                intoRow.merge(n.getKey(), n.getValue(), Integer::sum);
-            }
+            target.merge(e.getKey(), e.getValue(), Integer::sum);
         }
     }
 
-    private static List<WordPair> toWordPairs(Map<String, Map<String,Integer>> bigrams,
+    private static List<WordPair> toWordPairs(Map<String,Integer> bigrams,
                                               Map<String,Integer> wordIds) {
         List<WordPair> out = new ArrayList<>();
-        for (var prevEntry : bigrams.entrySet()) {
-            Integer prevId = wordIds.get(prevEntry.getKey());
-            if (prevId == null) continue;
-            for (var nextEntry : prevEntry.getValue().entrySet()) {
-                Integer nextId = wordIds.get(nextEntry.getKey());
-                if (nextId == null) continue;
-                WordPair wp = new WordPair();
-                wp.setPrecedingWordId(prevId);
-                wp.setFollowingWordId(nextId);
-                wp.setOccurrenceCount(nextEntry.getValue());
-                out.add(wp);
-            }
+
+        for (var entry : bigrams.entrySet()) {
+            String[] parts = entry.getKey().split(" ");
+            if (parts.length != 2) continue;  // sanity check
+
+            Integer firstId = wordIds.get(parts[0]);
+            Integer secondId = wordIds.get(parts[1]);
+            if (firstId == null || secondId == null) continue;
+
+            WordPair wp = new WordPair();
+            wp.setPrecedingWordId(firstId);
+            wp.setFollowingWordId(secondId);
+            wp.setOccurrenceCount(entry.getValue());
+            out.add(wp);
         }
         return out;
     }
+
+
+    //vincentphan
+    private static List<WordTriplet> toWordTriplets(Map<String,Integer> trigrams,
+                                                    Map<String,Integer> wordIds) {
+        List<WordTriplet> out = new ArrayList<>();
+
+        for (var entry : trigrams.entrySet()) {
+            String[] parts = entry.getKey().split(" ");
+            if (parts.length != 3) continue;  // sanity check
+
+            Integer firstId = wordIds.get(parts[0]);
+            Integer secondId = wordIds.get(parts[1]);
+            Integer thirdId = wordIds.get(parts[2]);
+            if (firstId == null || secondId == null || thirdId == null) continue;
+
+            WordTriplet wt = new WordTriplet();
+            wt.setFirstWordId(firstId);
+            wt.setSecondWordId(secondId);
+            wt.setThirdWordId(thirdId);
+            wt.setOccurrenceCount(entry.getValue());
+            out.add(wt);
+        }
+        return out;
+    }
+
 }
