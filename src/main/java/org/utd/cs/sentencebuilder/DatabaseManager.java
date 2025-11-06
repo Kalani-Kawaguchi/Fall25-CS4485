@@ -58,7 +58,7 @@ public class DatabaseManager {
 
     public static void closeDataSource() {
         if (dataSource != null && !dataSource.isClosed()) {
-            System.out.println("Closing database connection pool.");
+            logger.info("Closing database connection pool.");
             dataSource.close();
         }
     }
@@ -68,6 +68,9 @@ public class DatabaseManager {
     }
 
 
+    public Connection getConnection() throws SQLException {
+        return getConnect();
+    }
 
     /**
      * Creates the database schema.
@@ -97,6 +100,7 @@ public class DatabaseManager {
                 "preceding_word_id INT NOT NULL," +
                 "following_word_id INT NOT NULL," +
                 "occurrence_count INT DEFAULT 1 NOT NULL," +
+                "bi_end_frequency INT DEFAULT 0 NOT NULL," +
                 "FOREIGN KEY (preceding_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (following_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "UNIQUE KEY unique_pair (preceding_word_id, following_word_id)" +
@@ -109,6 +113,7 @@ public class DatabaseManager {
                 "second_word_id INT NOT NULL," +
                 "third_word_id INT NOT NULL," +
                 "follows_count INT DEFAULT 1 NOT NULL," +
+                "tri_end_frequency INT DEFAULT 0 NOT NULL," +
                 "FOREIGN KEY (first_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (second_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (third_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
@@ -346,6 +351,7 @@ public class DatabaseManager {
                     word.setTotalOccurrences(rs.getInt("total_occurrences"));
                     word.setStartSentenceCount(rs.getInt("start_sentence_count"));
                     word.setEndSequenceCount(rs.getInt("end_sequence_count"));
+                    word.setEndSequenceCount(rs.getInt("bi_end_frequency"));
                     logger.debug("Found word object for '{}'.", wordValue);
                     return word;
                 }
@@ -424,9 +430,9 @@ public class DatabaseManager {
      */
     public int addWordPair(WordPair pair) throws SQLException {
         logger.debug("Processing word pair: preceding_id={}, following_id={}", pair.getPrecedingWordId(), pair.getFollowingWordId());
-        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count) " +
-                "VALUES (?, ?, ?) " +
-                "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count)";
+        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count, bi_end_frequency) " +
+                "VALUES (?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count), bi_end_frequency + VALUES(bi_end_frequency)";
 
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -434,6 +440,7 @@ public class DatabaseManager {
             pstmt.setInt(1, pair.getPrecedingWordId());
             pstmt.setInt(2, pair.getFollowingWordId());
             pstmt.setInt(3, pair.getOccurrenceCount() > 0 ? pair.getOccurrenceCount() : 1);
+            pstmt.setInt(4, pair.getEndFrequency());
             int affectedRows = pstmt.executeUpdate();
 
             if (affectedRows > 0) {
@@ -459,9 +466,11 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public void bulkAddWordPairs(Collection<WordPair> wordPairs) throws SQLException {
-        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count) " +
-                "VALUES (?, ?, ?) " +
-                "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count)";
+        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count, bi_end_frequency) " +
+                "VALUES (?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE " +
+                "occurrence_count = occurrence_count + VALUES(occurrence_count), " +
+                "bi_end_frequency = bi_end_frequency + VALUES(bi_end_frequency)";
 
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -475,6 +484,7 @@ public class DatabaseManager {
                 pstmt.setInt(1, pair.getPrecedingWordId());
                 pstmt.setInt(2, pair.getFollowingWordId());
                 pstmt.setInt(3, pair.getOccurrenceCount());
+                pstmt.setInt(4, pair.getEndFrequency());
                 pstmt.addBatch();
             }
             logger.info("Executing batch insert/update for {} word pairs.", wordPairs.size());
@@ -492,7 +502,7 @@ public class DatabaseManager {
     public Collection<WordPair> getAllWordPairs() throws SQLException {
         logger.info("Retrieving all word pair objects from the database.");
         Collection<WordPair> allPairs = new ArrayList<>();
-        String sql = "SELECT sequence_id, preceding_word_id, following_word_id, occurrence_count FROM word_pairs";
+        String sql = "SELECT sequence_id, preceding_word_id, following_word_id, occurrence_count, bi_end_frequency FROM word_pairs";
 
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql);
@@ -504,6 +514,7 @@ public class DatabaseManager {
                 pair.setPrecedingWordId(rs.getInt("preceding_word_id"));
                 pair.setFollowingWordId(rs.getInt("following_word_id"));
                 pair.setOccurrenceCount(rs.getInt("occurrence_count"));
+                pair.setEndFrequency(rs.getInt("bi_end_frequency"));
                 allPairs.add(pair);
             }
         } catch (SQLException e) {
@@ -516,6 +527,42 @@ public class DatabaseManager {
     }
 
     /**
+     * Inserts or updates a collection of word triplets in a single batch operation.
+     *
+     * @param wordTriplets A collection of WordTriplet objects to be added or updated.
+     * @throws SQLException if a database access error occurs.
+     */
+    public void bulkAddWordTriplets(Collection<WordTriplet> wordTriplets) throws SQLException {
+        String sql = "INSERT INTO trigram_sequence (first_word_id, second_word_id, third_word_id, follows_count, tri_end_frequency) " +
+                "VALUES (?, ?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE " +
+                "follows_count = follows_count + VALUES(follows_count), " +
+                "tri_end_frequency = tri_end_frequency + VALUES(tri_end_frequency)";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            if (wordTriplets == null || wordTriplets.isEmpty()) {
+                logger.info("Word triplets collection is empty. No action taken.");
+                return;
+            }
+
+            for (WordTriplet triplet : wordTriplets) {
+                pstmt.setInt(1, triplet.getFirstWordId());
+                pstmt.setInt(2, triplet.getSecondWordId());
+                pstmt.setInt(3, triplet.getThirdWordId());
+                pstmt.setInt(4, triplet.getOccurrenceCount());
+                pstmt.setInt(5, triplet.getEndFrequency());
+                pstmt.addBatch();
+            }
+
+            logger.info("Executing batch insert/update for {} word triplets.", wordTriplets.size());
+            pstmt.executeBatch();
+            logger.info("Batch execution for word triplets complete.");
+        }
+    }
+
+    /**
      * Deletes all data from all tables in the database.
      * This is a destructive operation.
      * Resets auto-increment counters.
@@ -525,7 +572,7 @@ public class DatabaseManager {
 
     public void clearAllData() throws SQLException {
         logger.warn("--- DELETING ALL DATA FROM DATABASE ---");
-        String[] tables = {"trigram_sequence", "word_pairs", "words", "source_file"};
+        String[] tables = {"source_file", "trigram_sequence", "word_pairs", "words", "source_file"};
 
         try (Connection conn = getConnect(); Statement stmt = conn.createStatement()) {
             try {
@@ -546,9 +593,4 @@ public class DatabaseManager {
             }
         }
     }
-
-    public Connection getConnection() throws SQLException {
-        return getConnect();
-    }
-
 }
