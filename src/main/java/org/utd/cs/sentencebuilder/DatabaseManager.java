@@ -468,7 +468,9 @@ public class DatabaseManager {
     public void bulkAddWordPairs(Collection<WordPair> wordPairs) throws SQLException {
         String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count, bi_end_frequency) " +
                 "VALUES (?, ?, ?, ?) " +
-                "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count), bi_end_frequency + VALUES(bi_end_frequency)";
+                "ON DUPLICATE KEY UPDATE " +
+                "occurrence_count = occurrence_count + VALUES(occurrence_count), " +
+                "bi_end_frequency = bi_end_frequency + VALUES(bi_end_frequency)";
 
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -533,7 +535,9 @@ public class DatabaseManager {
     public void bulkAddWordTriplets(Collection<WordTriplet> wordTriplets) throws SQLException {
         String sql = "INSERT INTO trigram_sequence (first_word_id, second_word_id, third_word_id, follows_count, tri_end_frequency) " +
                 "VALUES (?, ?, ?, ?, ?) " +
-                "ON DUPLICATE KEY UPDATE follows_count = follows_count + VALUES(follows_count), tri_end_frequency = tri_end_frequency + VALUES(tri_end_frequency)";
+                "ON DUPLICATE KEY UPDATE " +
+                "follows_count = follows_count + VALUES(follows_count), " +
+                "tri_end_frequency = tri_end_frequency + VALUES(tri_end_frequency)";
 
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -568,7 +572,7 @@ public class DatabaseManager {
 
     public void clearAllData() throws SQLException {
         logger.warn("--- DELETING ALL DATA FROM DATABASE ---");
-        String[] tables = {"trigram_sequence", "word_pairs", "words", "source_file"};
+        String[] tables = {"source_file", "trigram_sequence", "word_pairs", "words", "source_file"};
 
         try (Connection conn = getConnect(); Statement stmt = conn.createStatement()) {
             try {

@@ -65,6 +65,8 @@ public class ImporterCli {
             Map<String, Word> globalWords = new HashMap<>();
             Map<String, Integer> globalBigrams = new HashMap<>();
             Map<String, Integer> globalTrigrams = new HashMap<>();
+            Map<String, Integer> globalBiEndCounts = new HashMap<>();
+            Map<String, Integer> globalTriEndCounts = new HashMap<>();
 
             // ---- PER-FILE PASS ----
             for (Path p : files) {
@@ -101,6 +103,9 @@ public class ImporterCli {
                 if (!wordsOnly) {
                     mergeCounts(globalBigrams, r.bigramCounts);
                     mergeCounts(globalTrigrams, r.trigramCounts);
+
+                    mergeCounts(globalBiEndCounts, r.bigramEndCounts);
+                    mergeCounts(globalTriEndCounts, r.trigramEndCounts);
                 }
             }
 
@@ -126,7 +131,7 @@ public class ImporterCli {
                 return;
             }
 
-            List<WordPair> pairs = toWordPairs(globalBigrams, wordIds);
+            List<WordPair> pairs = toWordPairs(globalBigrams, globalBiEndCounts, wordIds);
             System.out.println("Prepared " + pairs.size() + " word pairs. Inserting...");
             try {
                 db.bulkAddWordPairs(pairs);
@@ -136,7 +141,7 @@ public class ImporterCli {
                 ex.printStackTrace();
             }
 
-            List<WordTriplet> triplets = toWordTriplets(globalTrigrams, wordIds);
+            List<WordTriplet> triplets = toWordTriplets(globalTrigrams, globalTriEndCounts, wordIds);
             System.out.println("Prepared " + pairs.size() + " word triplets. Inserting...");
             try {
                 db.bulkAddWordTriplets(triplets);
@@ -206,10 +211,13 @@ public class ImporterCli {
     }
 
     private static List<WordPair> toWordPairs(Map<String,Integer> bigrams,
-                                              Map<String,Integer> wordIds) {
+                                              Map<String,Integer> bigramEndCounts,
+                                              Map<String, Integer> wordIds) {
         List<WordPair> out = new ArrayList<>();
 
         for (var entry : bigrams.entrySet()) {
+            String bigramKey = entry.getKey();
+
             String[] parts = entry.getKey().split(" ");
             if (parts.length != 2) continue;  // sanity check
 
@@ -217,10 +225,13 @@ public class ImporterCli {
             Integer secondId = wordIds.get(parts[1]);
             if (firstId == null || secondId == null) continue;
 
+            int biEndFrequency = bigramEndCounts.getOrDefault(bigramKey, 0);
+
             WordPair wp = new WordPair();
             wp.setPrecedingWordId(firstId);
             wp.setFollowingWordId(secondId);
             wp.setOccurrenceCount(entry.getValue());
+            wp.setEndFrequency(biEndFrequency);
             out.add(wp);
         }
         return out;
@@ -229,10 +240,13 @@ public class ImporterCli {
 
     //vincentphan
     private static List<WordTriplet> toWordTriplets(Map<String,Integer> trigrams,
+                                                    Map<String, Integer> trigramEndCounts,
                                                     Map<String,Integer> wordIds) {
         List<WordTriplet> out = new ArrayList<>();
 
         for (var entry : trigrams.entrySet()) {
+            String trigramKey = entry.getKey();
+
             String[] parts = entry.getKey().split(" ");
             if (parts.length != 3) continue;  // sanity check
 
@@ -241,11 +255,14 @@ public class ImporterCli {
             Integer thirdId = wordIds.get(parts[2]);
             if (firstId == null || secondId == null || thirdId == null) continue;
 
+            int triEndFrequency = trigramEndCounts.getOrDefault(trigramKey, 0);
+
             WordTriplet wt = new WordTriplet();
             wt.setFirstWordId(firstId);
             wt.setSecondWordId(secondId);
             wt.setThirdWordId(thirdId);
             wt.setOccurrenceCount(entry.getValue());
+            wt.setEndFrequency(triEndFrequency);
             out.add(wt);
         }
         return out;
