@@ -10,6 +10,7 @@ public class WordTriplet {
     private int secondWordId;
     private int thirdWordId;
     private int occurrenceCount;
+    private int triEndFrequency;
 
     // Constructors
     public WordTriplet() {}
@@ -57,6 +58,12 @@ public class WordTriplet {
     public void setOccurrenceCount(int occurrenceCount) {
         this.occurrenceCount = occurrenceCount;
     }
+
+    public int getOccurenceCount() {return occurrenceCount; }
+
+    public int getEndFrequency() {return triEndFrequency; }
+
+    public void setEndFrequency(int triEndFrequency) {this.triEndFrequency = triEndFrequency; }
 
 
 }

@@ -100,7 +100,7 @@ public class DatabaseManager {
                 "preceding_word_id INT NOT NULL," +
                 "following_word_id INT NOT NULL," +
                 "occurrence_count INT DEFAULT 1 NOT NULL," +
-                //"bi_end_frequency INT DEFAULT 0 NOT NULL," +
+                "bi_end_frequency INT DEFAULT 0 NOT NULL," +
                 "FOREIGN KEY (preceding_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (following_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "UNIQUE KEY unique_pair (preceding_word_id, following_word_id)" +
@@ -113,7 +113,7 @@ public class DatabaseManager {
                 "second_word_id INT NOT NULL," +
                 "third_word_id INT NOT NULL," +
                 "follows_count INT DEFAULT 1 NOT NULL," +
-                //"tri_end_frequency INT DEFAULT 0 NOT NULL," +
+                "tri_end_frequency INT DEFAULT 0 NOT NULL," +
                 "FOREIGN KEY (first_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (second_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (third_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
@@ -351,6 +351,7 @@ public class DatabaseManager {
                     word.setTotalOccurrences(rs.getInt("total_occurrences"));
                     word.setStartSentenceCount(rs.getInt("start_sentence_count"));
                     word.setEndSequenceCount(rs.getInt("end_sequence_count"));
+                    word.setEndSequenceCount(rs.getInt("bi_end_frequency"));
                     logger.debug("Found word object for '{}'.", wordValue);
                     return word;
                 }
@@ -429,9 +430,9 @@ public class DatabaseManager {
      */
     public int addWordPair(WordPair pair) throws SQLException {
         logger.debug("Processing word pair: preceding_id={}, following_id={}", pair.getPrecedingWordId(), pair.getFollowingWordId());
-        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count) " +
-                "VALUES (?, ?, ?) " +
-                "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count)";
+        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count, bi_end_frequency) " +
+                "VALUES (?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count), bi_end_frequency + VALUES(bi_end_frequency)";
 
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -439,6 +440,7 @@ public class DatabaseManager {
             pstmt.setInt(1, pair.getPrecedingWordId());
             pstmt.setInt(2, pair.getFollowingWordId());
             pstmt.setInt(3, pair.getOccurrenceCount() > 0 ? pair.getOccurrenceCount() : 1);
+            pstmt.setInt(4, pair.getEndFrequency());
             int affectedRows = pstmt.executeUpdate();
 
             if (affectedRows > 0) {
@@ -464,9 +466,9 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public void bulkAddWordPairs(Collection<WordPair> wordPairs) throws SQLException {
-        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count) " +
-                "VALUES (?, ?, ?) " +
-                "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count)";
+        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count, bi_end_frequency) " +
+                "VALUES (?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count), bi_end_frequency + VALUES(bi_end_frequency)";
 
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -480,6 +482,7 @@ public class DatabaseManager {
                 pstmt.setInt(1, pair.getPrecedingWordId());
                 pstmt.setInt(2, pair.getFollowingWordId());
                 pstmt.setInt(3, pair.getOccurrenceCount());
+                pstmt.setInt(4, pair.getEndFrequency());
                 pstmt.addBatch();
             }
             logger.info("Executing batch insert/update for {} word pairs.", wordPairs.size());
@@ -497,7 +500,7 @@ public class DatabaseManager {
     public Collection<WordPair> getAllWordPairs() throws SQLException {
         logger.info("Retrieving all word pair objects from the database.");
         Collection<WordPair> allPairs = new ArrayList<>();
-        String sql = "SELECT sequence_id, preceding_word_id, following_word_id, occurrence_count FROM word_pairs";
+        String sql = "SELECT sequence_id, preceding_word_id, following_word_id, occurrence_count, bi_end_frequency FROM word_pairs";
 
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql);
@@ -509,6 +512,7 @@ public class DatabaseManager {
                 pair.setPrecedingWordId(rs.getInt("preceding_word_id"));
                 pair.setFollowingWordId(rs.getInt("following_word_id"));
                 pair.setOccurrenceCount(rs.getInt("occurrence_count"));
+                pair.setEndFrequency(rs.getInt("bi_end_frequency"));
                 allPairs.add(pair);
             }
         } catch (SQLException e) {
@@ -527,9 +531,9 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public void bulkAddWordTriplets(Collection<WordTriplet> wordTriplets) throws SQLException {
-        String sql = "INSERT INTO trigram_sequence (first_word_id, second_word_id, third_word_id, follows_count) " +
-                "VALUES (?, ?, ?, ?) " +
-                "ON DUPLICATE KEY UPDATE follows_count = follows_count + VALUES(follows_count)";
+        String sql = "INSERT INTO trigram_sequence (first_word_id, second_word_id, third_word_id, follows_count, tri_end_frequency) " +
+                "VALUES (?, ?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE follows_count = follows_count + VALUES(follows_count), tri_end_frequency = tri_end_frequency + VALUES(tri_end_frequency)";
 
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -544,6 +548,7 @@ public class DatabaseManager {
                 pstmt.setInt(2, triplet.getSecondWordId());
                 pstmt.setInt(3, triplet.getThirdWordId());
                 pstmt.setInt(4, triplet.getOccurrenceCount());
+                pstmt.setInt(5, triplet.getEndFrequency());
                 pstmt.addBatch();
             }
 
