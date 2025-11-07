@@ -61,7 +61,7 @@ public class ImporterCli {
                 e.printStackTrace();
                 return;
             }
-
+            System.out.println("\n--- Accumulating Words & Sentences ---");
             Map<String, Word> globalWords = new HashMap<>();
             Map<String, Sentence> globalSentenceCount = new HashMap<>();
             Map<String, Integer> globalBigrams = new HashMap<>();
@@ -79,8 +79,7 @@ public class ImporterCli {
                 }
 
                 String text = Files.readString(p);
-                Tokenizer.Result r = Tokenizer.process(text);
-
+                Tokenizer.Result r = Tokenizer.process(text, Tokenizer.Mode.WORDS_AND_SENTENCES);
                 System.out.println("Tokens: " + r.tokens.size() + " | Unique words: " + r.words.size());
 
                 // record source file row (non-fatal if it fails)
@@ -94,13 +93,6 @@ public class ImporterCli {
                 // accumulate into global aggregates for one-time ID resolution
                 mergeWords(globalWords, r.words);
                 mergeSentences(globalSentenceCount, r.sentenceCounts);
-                if (!wordsOnly) {
-                    mergeCounts(globalBigrams, r.bigramCounts);
-                    mergeCounts(globalTrigrams, r.trigramCounts);
-
-                    mergeCounts(globalBiEndCounts, r.bigramEndCounts);
-                    mergeCounts(globalTriEndCounts, r.trigramEndCounts);
-                }
             }
 
             // ---- AFTER LOOP: finalize inserts ----
@@ -109,12 +101,9 @@ public class ImporterCli {
                 return;
             }
 
-            if (wordsOnly) {
-                System.out.println("\nWords-only run complete.");
-                return;
-            }
 
-            // upsert words for THIS file
+
+            // --- BATCH INSERT WORDS & SENTENCES ---
             try {
                 System.out.println("\nSaving " + globalWords.size() + " unique words to database...");
                 db.addWordsInBatch(globalWords.values());
@@ -131,6 +120,11 @@ public class ImporterCli {
                 ex.printStackTrace();
             }
 
+            if (wordsOnly) {
+                System.out.println("\nWords-only run complete.");
+                return;
+            }
+
             // Resolve word IDs once across the global set
             Map<String, Integer> wordIds;
             try {
@@ -142,26 +136,41 @@ public class ImporterCli {
                 return;
             }
 
-            List<WordPair> pairs = toWordPairs(globalBigrams, globalBiEndCounts, wordIds);
-            System.out.println("Prepared " + pairs.size() + " word pairs. Inserting...");
-            try {
-                db.bulkAddWordPairs(pairs);
-                System.out.println("Inserted bigrams.");
-            } catch (SQLException ex) {
-                System.err.println("bulkAddWordPairs failed: " + ex.getMessage());
-                ex.printStackTrace();
-            }
+            // --- STREAM AND BATCH N-GRAMS PER FILE ---
+            globalWords.clear();
+            globalSentenceCount.clear();
+            System.out.println("\n--- Streaming N-Grams ---");
+            for (Path p : files) {
+                if (importedFilesMap.containsKey(p.getFileName().toString())) {
+                    continue; // Skip this file
+                }
 
-            List<WordTriplet> triplets = toWordTriplets(globalTrigrams, globalTriEndCounts, wordIds);
-            System.out.println("Prepared " + pairs.size() + " word triplets. Inserting...");
-            try {
-                db.bulkAddWordTriplets(triplets);
-                System.out.println("Inserted Trigrams.");
-            } catch (SQLException ex) {
-                System.err.println("bulkAddWordTrigrams failed: " + ex.getMessage());
-                ex.printStackTrace();
-            }
+                String text = Files.readString(p);
+                Tokenizer.Result r = Tokenizer.process(text, Tokenizer.Mode.NGRAMS);
 
+                List<WordPair> pairs = toWordPairs(r.bigramCounts, r.bigramEndCounts, wordIds);
+                List<WordTriplet> triplets = toWordTriplets(r.trigramCounts, r.trigramEndCounts, wordIds);
+
+                if (!pairs.isEmpty()) {
+                    System.out.println("  Inserting " + pairs.size() + " word pairs...");
+                    try {
+                        db.bulkAddWordPairs(pairs);
+                    } catch (SQLException ex) {
+                        System.err.println("  bulkAddWordPairs failed: " + ex.getMessage());
+                        ex.printStackTrace();
+                    }
+                }
+
+                if (!triplets.isEmpty()) {
+                    System.out.println("  Inserting " + triplets.size() + " word triplets...");
+                    try {
+                        db.bulkAddWordTriplets(triplets);
+                    } catch (SQLException ex) {
+                        System.err.println("  bulkAddWordTriplets failed: " + ex.getMessage());
+                        ex.printStackTrace();
+                    }
+                }
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
