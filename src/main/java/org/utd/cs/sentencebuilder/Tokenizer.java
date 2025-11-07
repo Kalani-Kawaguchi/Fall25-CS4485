@@ -36,8 +36,8 @@ public class Tokenizer {
         Map<String, Integer> bigramCounts = new HashMap<>();    // "w1 w2" -> count
         Map<String, Integer> trigramCounts = new HashMap<>();   // "w1 w2 w3" -> count
 
-        /** Histogram: sentence length (#tokens) -> count. */
-        public final Map<Integer, Integer> sentenceLengthCounts = new HashMap<>();
+        /** Counts: sentence text -> count. */
+        public Map<String, Sentence> sentenceCounts = new HashMap<>();
 
         /** Bigram/trigram end-of-sentence counts. */
         public final Map<String, Integer> bigramEndCounts = new HashMap<>();
@@ -60,16 +60,22 @@ public class Tokenizer {
 
         int start = iterator.first();
         for (int end = iterator.next(); end != BreakIterator.DONE; start = end, end = iterator.next()) {
-            String sentence = text.substring(start, end).trim();
-            if (sentence.isEmpty()) continue;
+            String sentenceText = text.substring(start, end).trim();
+            if (sentenceText.isEmpty()) continue;
 
-            List<String> toks = tokenizeSentence(sentence);
+            List<String> toks = tokenizeSentence(sentenceText);
             if (toks.isEmpty()) continue;
 
             r.tokens.addAll(toks);
 
-            int len = toks.size();
-            r.sentenceLengthCounts.merge(len, 1, Integer::sum);
+            Sentence newSentence = r.sentenceCounts.get(sentenceText);
+
+            if (newSentence == null) {
+                // First time seeing this sentence *in this file*
+                int tokenCount = toks.size();
+                newSentence = new Sentence(sentenceText, tokenCount);
+                r.sentenceCounts.put(sentenceText, newSentence);
+            }
 
             //kevin
             for (int i = 0; i < toks.size(); i++) {

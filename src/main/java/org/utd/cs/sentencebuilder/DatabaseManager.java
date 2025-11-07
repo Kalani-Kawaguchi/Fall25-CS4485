@@ -120,6 +120,36 @@ public class DatabaseManager {
                 "UNIQUE KEY unique_trigram (first_word_id, second_word_id, third_word_id)" +
                 ");";
 
+        String createSentenceTable =
+                "CREATE TABLE IF NOT EXISTS sentences (" +
+                "sentence_id INT AUTO_INCREMENT PRIMARY KEY," +
+                "text TEXT NOT NULL," + // consider hashing to compare on hash rather than word
+                "token_count INT NOT NULL," +
+                "sentence_occurrences INT NOT NULL DEFAULT 1," +
+                "sentence_hash CHAR(64) GENERATED ALWAYS AS (SHA2(text, 256)) STORED," +
+                "UNIQUE KEY uk_sentence_hash (sentence_hash)" + //for uniqueness and searching
+                ")";
+
+        // Do not try to normalize or use references for this table.
+        String createSentenceFeatureTable =
+                "CREATE TABLE IF NOT EXISTS sentence_features (" +
+                "sentence_id INT NOT NULL," +
+                "token_index INT NOT NULL," +
+                "word VARCHAR(255) NOT NULL," +
+                "context_type ENUM('unigram', 'bigram', 'trigram') NOT NULL," +
+                "context_ngram VARCHAR(512) NOT NULL," +
+                "sentence_len INT NOT NULL," +
+                "p_eos_context DOUBLE," +
+                "p_eos_word DOUBLE," +
+                "p_eos_length DOUBLE," +
+                "x1 DOUBLE," +           // logit(P(EOS|context))
+                "x2 DOUBLE," +           // logit(P(EOS|word))
+                "x3 DOUBLE," +           // logit(P(EOS|length))
+                "label TINYINT NOT NULL," +  // 1 if EOS follows, else 0
+                "PRIMARY KEY (sentence_id, token_index)" +
+                ")";
+
+
         try (Connection conn = getConnect(); Statement stmt = conn.createStatement()) {
             logger.info("Building database schema...");
             stmt.execute(createSourceFileTable);
@@ -130,6 +160,10 @@ public class DatabaseManager {
             logger.info("Table 'word_pairs' created or already exists.");
             stmt.execute(createTrigramSequenceTable);
             logger.info("Table 'trigram_sequence' created or already exists.");
+            stmt.execute(createSentenceTable);
+            logger.info("Table 'sentences' created or already exists.");
+            stmt.execute(createSentenceFeatureTable);
+            logger.info("Table 'sentence_features' created or already exists.");
             logger.info("Database build complete.");
         } catch (SQLException e) {
             logger.error("Database build failed.", e);
@@ -199,6 +233,36 @@ public class DatabaseManager {
         }
         logger.info("Successfully retrieved {} source files.", fileMap.size());
         return fileMap;
+    }
+
+    /**
+     * Inserts a collection of sentences in a single batch operation.
+     *
+     * @param sentenceCollection A collection of Sentence records.
+     * @throws SQLException if a database access error occurs.
+     */
+    public void addSentencesInBatch(Collection<Sentence> sentenceCollection) throws SQLException {
+        if (sentenceCollection == null || sentenceCollection.isEmpty()) {
+            logger.info("Sentence collection is empty. No action taken.");
+            return;
+        }
+        logger.info("Executing batch insert for {} sentences.", sentenceCollection.size());
+        String sql = "INSERT INTO sentences (text, token_count, sentence_occurrences) VALUES (?, ?, ?)" +
+                "ON DUPLICATE KEY UPDATE " +
+                "sentence_occurrences = sentence_occurrences + VALUES(sentence_occurrences)";
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            for (Sentence sentence : sentenceCollection) {
+                pstmt.setString(1, sentence.getText());
+                pstmt.setInt(2, sentence.getTokenCount());
+                pstmt.setInt(3, sentence.getSentenceOccurrences());
+                pstmt.addBatch();
+            }
+
+            pstmt.executeBatch();
+            logger.info("Batch execution for sentences complete.");
+        }
     }
 
     /**

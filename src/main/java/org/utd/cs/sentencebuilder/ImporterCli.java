@@ -63,6 +63,7 @@ public class ImporterCli {
             }
 
             Map<String, Word> globalWords = new HashMap<>();
+            Map<String, Sentence> globalSentenceCount = new HashMap<>();
             Map<String, Integer> globalBigrams = new HashMap<>();
             Map<String, Integer> globalTrigrams = new HashMap<>();
             Map<String, Integer> globalBiEndCounts = new HashMap<>();
@@ -89,17 +90,10 @@ public class ImporterCli {
                     System.err.println("addSourceFile failed for " + p.getFileName() + ": " + ex.getMessage());
                 }
 
-                // upsert words for THIS file
-                try {
-                    db.addWordsInBatch(r.words.values());
-                } catch (SQLException ex) {
-                    System.err.println("addWordsInBatch failed for " + p.getFileName() + ": " + ex.getMessage());
-                    ex.printStackTrace();
-                    continue; // move to next file
-                }
 
                 // accumulate into global aggregates for one-time ID resolution
                 mergeWords(globalWords, r.words);
+                mergeSentences(globalSentenceCount, r.sentenceCounts);
                 if (!wordsOnly) {
                     mergeCounts(globalBigrams, r.bigramCounts);
                     mergeCounts(globalTrigrams, r.trigramCounts);
@@ -118,6 +112,23 @@ public class ImporterCli {
             if (wordsOnly) {
                 System.out.println("\nWords-only run complete.");
                 return;
+            }
+
+            // upsert words for THIS file
+            try {
+                System.out.println("\nSaving " + globalWords.size() + " unique words to database...");
+                db.addWordsInBatch(globalWords.values());
+            } catch (SQLException ex) {
+                System.err.println("addWordsInBatch failed: " + ex.getMessage());
+                ex.printStackTrace();
+                return;
+            }
+
+            try {
+                db.addSentencesInBatch(globalSentenceCount.values());
+            } catch (SQLException ex) {
+                System.err.println("addSentencesInBatch failed: " + ex.getMessage());
+                ex.printStackTrace();
             }
 
             // Resolve word IDs once across the global set
@@ -182,6 +193,30 @@ public class ImporterCli {
             return st.filter(p -> Files.isRegularFile(p) && p.toString().toLowerCase().endsWith(".txt"))
                      .sorted()
                      .collect(Collectors.toList());
+        }
+    }
+
+
+    private static void mergeSentences(Map<String, Sentence> target, Map<String, Sentence> src) {
+        // Loop over the map from the file (src)
+        for (var entry : src.entrySet()) {
+            String text = entry.getKey();
+            Sentence from = entry.getValue(); // Sentence POJO from the file
+
+            // Check if it's in the global map (target)
+            Sentence into = target.get(text);
+
+            if (into == null) {
+                // Not in the global map yet.
+                // Create a new POJO for the global map.
+                into = new Sentence(from.getText(), from.getTokenCount());
+                target.put(text, into);
+            }
+
+            // Add the counts from the file map to the global map's POJO
+            into.setSentenceOccurrences(
+                    into.getSentenceOccurrences() + from.getSentenceOccurrences()
+            );
         }
     }
 
