@@ -64,11 +64,7 @@ public class ImporterCli {
             System.out.println("\n--- Accumulating Words & Sentences ---");
             Map<String, Word> globalWords = new HashMap<>();
             Map<String, Sentence> globalSentenceCount = new HashMap<>();
-            Map<String, Integer> globalBigrams = new HashMap<>();
-            Map<String, Integer> globalTrigrams = new HashMap<>();
-            Map<String, Integer> globalBiEndCounts = new HashMap<>();
-            Map<String, Integer> globalTriEndCounts = new HashMap<>();
-
+            Map<Integer, Integer> globalLengthHistogram = new HashMap<>();
             // ---- PER-FILE PASS ----
             for (Path p : files) {
                 System.out.println("\n--- Processing: " + p.getFileName() + " ---");
@@ -93,6 +89,7 @@ public class ImporterCli {
                 // accumulate into global aggregates for one-time ID resolution
                 mergeWords(globalWords, r.words);
                 mergeSentences(globalSentenceCount, r.sentenceCounts);
+                mergeCounts(globalLengthHistogram, r.sentenceLengthCounts);
             }
 
             // ---- AFTER LOOP: finalize inserts ----
@@ -100,7 +97,6 @@ public class ImporterCli {
                 System.out.println("\nNothing to insert (no words collected).");
                 return;
             }
-
 
 
             // --- BATCH INSERT WORDS & SENTENCES ---
@@ -171,6 +167,16 @@ public class ImporterCli {
                     }
                 }
             }
+
+            try {
+                FeatureBuilder builder = new FeatureBuilder(db);
+                builder.buildAllSentenceFeatures();
+            } catch (SQLException ex) {
+                ex.printStackTrace();
+            }
+
+
+
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -248,8 +254,17 @@ public class ImporterCli {
         }
     }
 
-    private static void mergeCounts(Map<String,Integer> target, Map<String,Integer> src) {
-        for (var e : src.entrySet()) {
+    /**
+     * Merges the counts from a source map into a target map.
+     * If a key exists in both maps, their integer values are summed.
+     */
+    private static <K> void mergeCounts(Map<K, Integer> target, Map<K, Integer> src) {
+        if (src == null || target == null) {
+            return;
+        }
+        // Iterate over every entry in the source map
+        for (Map.Entry<K, Integer> e : src.entrySet()) {
+            // Use merge() to add the value, or sum it if the key already exists
             target.merge(e.getKey(), e.getValue(), Integer::sum);
         }
     }

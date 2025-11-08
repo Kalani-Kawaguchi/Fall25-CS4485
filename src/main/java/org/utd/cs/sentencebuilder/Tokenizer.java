@@ -33,8 +33,7 @@ public class Tokenizer {
     //only used by depecrated function.
     private static final Pattern EDGE_PUNCT = Pattern.compile("^[^\\p{L}\\p{Nd}']+|[^\\p{L}\\p{Nd}']+$");
 
-    private static final Pattern SENTENCE_SPLIT = Pattern.compile("(?<=[.!?])\\s+");
-
+    private static final Pattern TOKEN_FINDER = Pattern.compile("[\\p{L}\\p{Nd}]+(?:['’-][\\p{L}\\p{Nd}]+)*");
     public static class Result {
         /** Word string -> Word object (with total/start/end counts). */
         public final Map<String, Word> words = new HashMap<>();
@@ -45,6 +44,8 @@ public class Tokenizer {
         /** Counts: sentence text -> Sentence object. */
         public Map<String, Sentence> sentenceCounts = new HashMap<>();
 
+        /** Histogram of sentence length vs frequency. */
+        public Map<Integer, Integer> sentenceLengthCounts = new HashMap<>();
         /** Bigram/trigram end-of-sentence counts. */
         public final Map<String, Integer> bigramEndCounts = new HashMap<>();
         public final Map<String, Integer> trigramEndCounts = new HashMap<>();
@@ -93,13 +94,17 @@ public class Tokenizer {
             r.tokens.addAll(toks);
 
             if (doWords) {
-                Sentence newSentence = r.sentenceCounts.get(sentenceText);
+                String cleanSentence = String.join(" ", toks);
+                Sentence newSentence = r.sentenceCounts.get(cleanSentence);
+                int tokenCount = toks.size();
+                r.sentenceLengthCounts.merge(tokenCount, 1, Integer::sum);
                 if (newSentence == null) {
                     // First time seeing this sentence *in this file*
-                    int tokenCount = toks.size();
-                    newSentence = new Sentence(sentenceText, tokenCount);
-                    r.sentenceCounts.put(sentenceText, newSentence);
+                    newSentence = new Sentence(cleanSentence, tokenCount);
+                    r.sentenceCounts.put(cleanSentence, newSentence);
                 }
+
+                newSentence.setSentenceOccurrences(newSentence.getSentenceOccurrences() + 1);
 
                 //kevin
                 for (int i = 0; i < toks.size(); i++) {
@@ -154,21 +159,20 @@ public class Tokenizer {
         return r;
     }
 
+    // Regex because BreakIterator fails on hyphenated words.
     /** Tokenize a single sentence (clean punctuation, lowercase). */
-    private static List<String> tokenizeSentence(String sent) {
+    public static List<String> tokenizeSentence(String sent) {
         List<String> toks = new ArrayList<>();
-        for (String raw : sent.split("\\s+")) {
-            if (raw == null || raw.isBlank()) continue;
-            String cleaned = EDGE_PUNCT.matcher(raw).replaceAll("");
-            if (cleaned.isEmpty()) continue;
-            toks.add(cleaned.toLowerCase(Locale.ROOT));
+        var matcher = TOKEN_FINDER.matcher(sent);
+        while (matcher.find()) {
+            toks.add(matcher.group().toLowerCase(Locale.ROOT));
         }
         return toks;
     }
 
     // deprecated but keeping around just in case?
     /** Naive sentence boundary marking: split on ., !, ? (keeps it simple for v1). */
-    private static void markSentenceStartsAndEnds(Map<String, Word> wordMap, String fullText) {
+    public static void markSentenceStartsAndEnds(Map<String, Word> wordMap, String fullText) {
         // Split on punctuation followed by whitespace. Then increment start/end counts on first/last token of each segment.
         String[] sents = fullText.split("(?<=[.!?])\\s+");
         for (String sent : sents) {

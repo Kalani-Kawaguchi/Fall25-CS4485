@@ -5,10 +5,10 @@ import java.util.Objects;
 
 public class Sentence {
 
-    private Integer sentenceId;     // For data from the DB
+    private Integer sentenceId;
     private String text;
     private int tokenCount;
-    private int sentenceOccurrences; // The count to be merged
+    private int sentenceOccurrences;
 
     // Default constructor
     public Sentence() { }
@@ -21,6 +21,16 @@ public class Sentence {
         this.text = text;
         this.tokenCount = tokenCount;
         this.sentenceOccurrences = 0;
+    }
+
+    /**
+     * Constructor for hydrating a full Sentence object from the database.
+     */
+    public Sentence(Integer sentenceId, String text, int tokenCount, int sentenceOccurrences) {
+        this.sentenceId = sentenceId;
+        this.text = text;
+        this.tokenCount = tokenCount;
+        this.sentenceOccurrences = sentenceOccurrences;
     }
 
     // --- Getters and Setters ---

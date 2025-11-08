@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import java.io.InputStream;
 import java.sql.*;
 import java.util.*;
+import java.util.function.Consumer;
 
 
 public class DatabaseManager {
@@ -52,7 +53,7 @@ public class DatabaseManager {
             logger.info("Database connection pool initialized successfully.");
 
         } catch (Exception e) {
-            throw new RuntimeException("❌ Failed to initialize database connection pool.", e);
+            throw new RuntimeException("Failed to initialize database connection pool.", e);
         }
     }
 
@@ -99,7 +100,7 @@ public class DatabaseManager {
                 "sequence_id INT AUTO_INCREMENT PRIMARY KEY," +
                 "preceding_word_id INT NOT NULL," +
                 "following_word_id INT NOT NULL," +
-                "occurrence_count INT DEFAULT 1 NOT NULL," +
+                "bi_occurrence_count INT DEFAULT 1 NOT NULL," +
                 "bi_end_frequency INT DEFAULT 0 NOT NULL," +
                 "FOREIGN KEY (preceding_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (following_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
@@ -112,7 +113,7 @@ public class DatabaseManager {
                 "first_word_id INT NOT NULL," +
                 "second_word_id INT NOT NULL," +
                 "third_word_id INT NOT NULL," +
-                "follows_count INT DEFAULT 1 NOT NULL," +
+                "tri_occurrence_count INT DEFAULT 1 NOT NULL," +
                 "tri_end_frequency INT DEFAULT 0 NOT NULL," +
                 "FOREIGN KEY (first_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
                 "FOREIGN KEY (second_word_id) REFERENCES words(word_id) ON DELETE CASCADE," +
@@ -126,7 +127,7 @@ public class DatabaseManager {
                 "text TEXT NOT NULL," + // consider hashing to compare on hash rather than word
                 "token_count INT NOT NULL," +
                 "sentence_occurrences INT NOT NULL DEFAULT 1," +
-                "sentence_hash CHAR(64) GENERATED ALWAYS AS (SHA2(text, 256)) STORED," +
+                "sentence_hash BINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(text, 256))) STORED," +
                 "UNIQUE KEY uk_sentence_hash (sentence_hash)" + //for uniqueness and searching
                 ")";
 
@@ -266,6 +267,46 @@ public class DatabaseManager {
     }
 
     /**
+     * Streams all sentences from the database and processes them one by one
+     * using the provided Consumer.
+     *
+     * This is the memory-efficient approach, ideal for very large datasets.
+     * It uses the streaming hints from your original method.
+     *
+     * @param sentenceConsumer A function that accepts and processes a single Sentence.
+     * @throws SQLException if a database access error occurs.
+     */
+    public void processSentences(Consumer<Sentence> sentenceConsumer) throws SQLException {
+        String sql = "SELECT sentence_id, text, token_count, sentence_occurrences FROM sentences";
+
+        // Ensures the Connection, PreparedStatement, and ResultSet are all
+        // closed automatically, even if an error occurs during processing.
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(
+                     sql,
+                     ResultSet.TYPE_FORWARD_ONLY,
+                     ResultSet.CONCUR_READ_ONLY
+             )) {
+
+            pstmt.setFetchSize(Integer.MIN_VALUE);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    // Build the sentence object
+                    Sentence sentence = new Sentence(
+                            rs.getInt("sentence_id"),
+                            rs.getString("text"),
+                            rs.getInt("token_count"),
+                            rs.getInt("sentence_occurrences")
+                    );
+                    // Pass the built object to the consumer
+                    sentenceConsumer.accept(sentence);
+                }
+            }
+        }
+    }
+
+    /**
      * Inserts a new word or updates its counts if it already exists.
      *
      * @param word The Word object to add or update.
@@ -395,6 +436,34 @@ public class DatabaseManager {
         return wordIdMap;
     }
 
+    /**
+     * Retrieves a map of ALL word strings to their corresponding word_ids.
+     *
+     * @return A Map where keys are all word strings in the database and
+     * values are their corresponding database IDs.
+     * @throws SQLException if a database access error occurs.
+     */
+    public Map<String, Integer> getWordIds() throws SQLException {
+        Map<String, Integer> wordIdMap = new HashMap<>();
+        logger.debug("Querying for all word_ids in the database.");
+
+        // SQL query to select all words and their IDs
+        String sql = "SELECT word_value, word_id FROM words";
+
+        // Use try-with-resources to ensure all resources are closed
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) { // No parameters to set
+
+            // Iterate over the result set and populate the map
+            while (rs.next()) {
+                wordIdMap.put(rs.getString("word_value"), rs.getInt("word_id"));
+            }
+        }
+
+        logger.debug("Retrieved {} total word_ids.", wordIdMap.size());
+        return wordIdMap;
+    }
 
     /**
      * Retrieves a complete Word object from the database by its value.
@@ -494,9 +563,9 @@ public class DatabaseManager {
      */
     public int addWordPair(WordPair pair) throws SQLException {
         logger.debug("Processing word pair: preceding_id={}, following_id={}", pair.getPrecedingWordId(), pair.getFollowingWordId());
-        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count, bi_end_frequency) " +
+        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, bi_occurrence_count, bi_end_frequency) " +
                 "VALUES (?, ?, ?, ?) " +
-                "ON DUPLICATE KEY UPDATE occurrence_count = occurrence_count + VALUES(occurrence_count), bi_end_frequency + VALUES(bi_end_frequency)";
+                "ON DUPLICATE KEY UPDATE bi_occurrence_count = bi_occurrence_count + VALUES(bi_occurrence_count), bi_end_frequency + VALUES(bi_end_frequency)";
 
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -530,10 +599,10 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public void bulkAddWordPairs(Collection<WordPair> wordPairs) throws SQLException {
-        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, occurrence_count, bi_end_frequency) " +
+        String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, bi_occurrence_count, bi_end_frequency) " +
                 "VALUES (?, ?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE " +
-                "occurrence_count = occurrence_count + VALUES(occurrence_count), " +
+                "bi_occurrence_count = bi_occurrence_count + VALUES(bi_occurrence_count), " +
                 "bi_end_frequency = bi_end_frequency + VALUES(bi_end_frequency)";
 
         try (Connection conn = getConnect();
@@ -566,7 +635,7 @@ public class DatabaseManager {
     public Collection<WordPair> getAllWordPairs() throws SQLException {
         logger.info("Retrieving all word pair objects from the database.");
         Collection<WordPair> allPairs = new ArrayList<>();
-        String sql = "SELECT sequence_id, preceding_word_id, following_word_id, occurrence_count, bi_end_frequency FROM word_pairs";
+        String sql = "SELECT sequence_id, preceding_word_id, following_word_id, bi_occurrence_count, bi_end_frequency FROM word_pairs";
 
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql);
@@ -577,7 +646,7 @@ public class DatabaseManager {
                 pair.setSequenceId(rs.getInt("sequence_id"));
                 pair.setPrecedingWordId(rs.getInt("preceding_word_id"));
                 pair.setFollowingWordId(rs.getInt("following_word_id"));
-                pair.setOccurrenceCount(rs.getInt("occurrence_count"));
+                pair.setOccurrenceCount(rs.getInt("bi_occurrence_count"));
                 pair.setEndFrequency(rs.getInt("bi_end_frequency"));
                 allPairs.add(pair);
             }
@@ -597,10 +666,10 @@ public class DatabaseManager {
      * @throws SQLException if a database access error occurs.
      */
     public void bulkAddWordTriplets(Collection<WordTriplet> wordTriplets) throws SQLException {
-        String sql = "INSERT INTO trigram_sequence (first_word_id, second_word_id, third_word_id, follows_count, tri_end_frequency) " +
+        String sql = "INSERT INTO trigram_sequence (first_word_id, second_word_id, third_word_id, tri_occurrence_count, tri_end_frequency) " +
                 "VALUES (?, ?, ?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE " +
-                "follows_count = follows_count + VALUES(follows_count), " +
+                "tri_occurrence_count = tri_occurrence_count + VALUES(tri_occurrence_count), " +
                 "tri_end_frequency = tri_end_frequency + VALUES(tri_end_frequency)";
 
         try (Connection conn = getConnect();
@@ -627,6 +696,195 @@ public class DatabaseManager {
     }
 
     /**
+     * Inserts or updates a batch of sentence feature records in the database.
+     * Each feature corresponds to a token-level EOS prediction context.
+     *
+     * @param features The collection of SentenceFeature objects to insert.
+     * @throws SQLException if a database access error occurs.
+     */
+    public void bulkAddSentenceFeatures(Collection<SentenceFeature> features) throws SQLException {
+        logger.info("Inserting {} sentence features in batch.", features.size());
+        //I forgot java had text blocks...
+        String sql = """
+        INSERT INTO sentence_features (
+            sentence_id, token_index, word, context_type, context_ngram,
+            sentence_len, p_eos_context, p_eos_word, p_eos_length,
+            x1, x2, x3, label
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            p_eos_context = VALUES(p_eos_context),
+            p_eos_word = VALUES(p_eos_word),
+            p_eos_length = VALUES(p_eos_length),
+            x1 = VALUES(x1), x2 = VALUES(x2), x3 = VALUES(x3),
+            label = VALUES(label)
+        """;
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            for (SentenceFeature f : features) {
+                pstmt.setInt(1, f.getSentenceId());
+                pstmt.setInt(2, f.getTokenIndex());
+                pstmt.setString(3, f.getWord());
+                pstmt.setString(4, f.getContextType());
+                pstmt.setString(5, f.getContextNgram());
+                pstmt.setInt(6, f.getSentenceLen());
+                pstmt.setDouble(7, f.getpEosContext());
+                pstmt.setDouble(8, f.getpEosWord());
+                pstmt.setDouble(9, f.getpEosLength());
+                pstmt.setDouble(10, f.getX1());
+                pstmt.setDouble(11, f.getX2());
+                pstmt.setDouble(12, f.getX3());
+                pstmt.setInt(13, f.getLabel());
+                pstmt.addBatch();
+            }
+
+            pstmt.executeBatch();
+            logger.info("Batch sentence feature insertion complete.");
+        } catch (SQLException e) {
+            logger.error("Failed to insert sentence features.", e);
+            throw e;
+        }
+    }
+
+    /**
+     * Retrieves the probability P(EOS | word) for a given word ID.
+     *
+     * @param wordId The word's unique identifier.
+     * @return The probability that the word ends a sentence.
+     * @throws SQLException if a database access error occurs.
+     */
+    public double getWordEndProbability(int wordId) throws SQLException {
+        String sql = """
+        SELECT CAST(end_sequence_count AS DOUBLE) / total_occurrences AS prob
+        FROM words WHERE word_id = ?
+        """;
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, wordId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) return rs.getDouble("prob");
+            }
+        }
+        return 0.0;
+    }
+
+    public double getUnigramEndProbability(int w1) throws SQLException {
+        String sql = """
+        SELECT CASE
+            WHEN total_occurrences > 0
+            THEN CAST(end_sequence_count AS DOUBLE) / total_occurrences
+            ELSE 0.0
+        END AS prob
+        FROM words
+        WHERE word_id = ?
+        """;
+
+        return 0.0;
+    }
+
+    /**
+     * Retrieves the probability P(EOS | bigram) for a given pair of word IDs.
+     */
+    public double getBigramEndProbability(int w1, int w2) throws SQLException {
+        String sql = """
+        SELECT CASE
+            WHEN bi_occurrence_count > 0
+            THEN CAST(bi_end_frequency AS DOUBLE) / bi_occurrence_count
+            ELSE 0.0
+        END AS prob
+        FROM word_pairs
+        WHERE preceding_word_id = ? AND following_word_id = ?
+        """;
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, w1);
+            pstmt.setInt(2, w2);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) return rs.getDouble("prob");
+            }
+        }
+        return 0.0;
+    }
+
+    /**
+     * Retrieves the probability P(EOS | trigram) for a given triplet of word IDs.
+     */
+    public double getTrigramEndProbability(int w1, int w2, int w3) throws SQLException {
+        String sql = """
+        SELECT CASE
+            WHEN tri_occurrence_count > 0
+            THEN CAST(tri_end_frequency AS DOUBLE) / tri_occurrence_count 
+            ELSE 0.0
+        END AS prob
+        FROM trigram_sequence
+        WHERE first_word_id = ? AND second_word_id = ? AND third_word_id = ?
+        """;
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, w1);
+            pstmt.setInt(2, w2);
+            pstmt.setInt(3, w3);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) return rs.getDouble("prob");
+            }
+        }
+        return 0.0;
+    }
+
+    /**
+     * Computes the average sentence length across all sentences in the corpus.
+     *
+     * @return The mean token count across all sentences.
+     * @throws SQLException if a database access error occurs.
+     */
+    public double getAverageSentenceLength() throws SQLException {
+        String sql = "SELECT AVG(token_count) AS avg_len FROM sentences";
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+            if (rs.next()) return rs.getDouble("avg_len");
+        }
+        return 0.0;
+    }
+
+    /**
+     * Retrieves all sentence IDs from the database.
+     *
+     * @return A list of sentence IDs.
+     * @throws SQLException if a database access error occurs.
+     */
+    public List<Integer> getAllSentenceIds() throws SQLException {
+        List<Integer> ids = new ArrayList<>();
+        String sql = "SELECT sentence_id FROM sentences";
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+            while (rs.next()) ids.add(rs.getInt("sentence_id"));
+        }
+        return ids;
+    }
+
+    /**
+     * Retrieves the text of a sentence given its ID.
+     *
+     * @param sentenceId The unique sentence identifier.
+     * @return The sentence text, or null if not found.
+     * @throws SQLException if a database access error occurs.
+     */
+    public String getSentenceText(int sentenceId) throws SQLException {
+        String sql = "SELECT text FROM sentences WHERE sentence_id = ?";
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, sentenceId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) return rs.getString("text");
+            }
+        }
+        return null;
+    }
+
+    /**
      * Deletes all data from all tables in the database.
      * This is a destructive operation.
      * Resets auto-increment counters.
@@ -636,7 +894,7 @@ public class DatabaseManager {
 
     public void clearAllData() throws SQLException {
         logger.warn("--- DELETING ALL DATA FROM DATABASE ---");
-        String[] tables = {"source_file", "trigram_sequence", "word_pairs", "words", "source_file"};
+        String[] tables = {"sentence_features","sentences", "trigram_sequence", "word_pairs", "words", "source_file"};
 
         try (Connection conn = getConnect(); Statement stmt = conn.createStatement()) {
             try {
