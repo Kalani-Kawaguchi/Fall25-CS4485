@@ -2,7 +2,7 @@
  * ImporterCli.java
  * CS4485 - Fall 2025 - Sentence Builder Project
  *
- * Author: Kevin Tran
+ * Author: Kevin Tran & Vincent Phan
  * Date: October 6, 2025
  *
  * Description:
@@ -11,9 +11,10 @@
  */
 
 
-
-
 package org.utd.cs.sentencebuilder;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -34,6 +35,7 @@ import java.util.stream.Collectors;
  */
 public class ImporterCli {
 
+    private static final Logger logger = LoggerFactory.getLogger(ImporterCli.class);
     private final DatabaseManager db;
 
     public ImporterCli(DatabaseManager db) {
@@ -61,10 +63,13 @@ public class ImporterCli {
                 e.printStackTrace();
                 return;
             }
-            System.out.println("\n--- Accumulating Words & Sentences ---");
+
             Map<String, Word> globalWords = new HashMap<>();
-            Map<String, Sentence> globalSentenceCount = new HashMap<>();
-            Map<Integer, Integer> globalLengthHistogram = new HashMap<>();
+            Map<String, Integer> globalBigrams = new HashMap<>();
+            Map<String, Integer> globalTrigrams = new HashMap<>();
+            Map<String, Integer> globalBiEndCounts = new HashMap<>();
+            Map<String, Integer> globalTriEndCounts = new HashMap<>();
+
             // ---- PER-FILE PASS ----
             for (Path p : files) {
                 System.out.println("\n--- Processing: " + p.getFileName() + " ---");
@@ -75,7 +80,8 @@ public class ImporterCli {
                 }
 
                 String text = Files.readString(p);
-                Tokenizer.Result r = Tokenizer.process(text, Tokenizer.Mode.WORDS_AND_SENTENCES);
+                Tokenizer.Result r = Tokenizer.process(text);
+
                 System.out.println("Tokens: " + r.tokens.size() + " | Unique words: " + r.words.size());
 
                 // record source file row (non-fatal if it fails)
@@ -85,35 +91,30 @@ public class ImporterCli {
                     System.err.println("addSourceFile failed for " + p.getFileName() + ": " + ex.getMessage());
                 }
 
+                // upsert words for THIS file
+                try {
+                    db.addWordsInBatch(r.words.values());
+                } catch (SQLException ex) {
+                    System.err.println("addWordsInBatch failed for " + p.getFileName() + ": " + ex.getMessage());
+                    ex.printStackTrace();
+                    continue; // move to next file
+                }
 
                 // accumulate into global aggregates for one-time ID resolution
                 mergeWords(globalWords, r.words);
-                mergeSentences(globalSentenceCount, r.sentenceCounts);
-                mergeCounts(globalLengthHistogram, r.sentenceLengthCounts);
+                if (!wordsOnly) {
+                    mergeCounts(globalBigrams, r.bigramCounts);
+                    mergeCounts(globalTrigrams, r.trigramCounts);
+
+                    mergeCounts(globalBiEndCounts, r.bigramEndCounts);
+                    mergeCounts(globalTriEndCounts, r.trigramEndCounts);
+                }
             }
 
             // ---- AFTER LOOP: finalize inserts ----
             if (globalWords.isEmpty()) {
                 System.out.println("\nNothing to insert (no words collected).");
                 return;
-            }
-
-
-            // --- BATCH INSERT WORDS & SENTENCES ---
-            try {
-                System.out.println("\nSaving " + globalWords.size() + " unique words to database...");
-                db.addWordsInBatch(globalWords.values());
-            } catch (SQLException ex) {
-                System.err.println("addWordsInBatch failed: " + ex.getMessage());
-                ex.printStackTrace();
-                return;
-            }
-
-            try {
-                db.addSentencesInBatch(globalSentenceCount.values());
-            } catch (SQLException ex) {
-                System.err.println("addSentencesInBatch failed: " + ex.getMessage());
-                ex.printStackTrace();
             }
 
             if (wordsOnly) {
@@ -132,52 +133,92 @@ public class ImporterCli {
                 return;
             }
 
-            // --- STREAM AND BATCH N-GRAMS PER FILE ---
-            globalWords.clear();
-            globalSentenceCount.clear();
-            System.out.println("\n--- Streaming N-Grams ---");
-            for (Path p : files) {
-                if (importedFilesMap.containsKey(p.getFileName().toString())) {
-                    continue; // Skip this file
-                }
-
-                String text = Files.readString(p);
-                Tokenizer.Result r = Tokenizer.process(text, Tokenizer.Mode.NGRAMS);
-
-                List<WordPair> pairs = toWordPairs(r.bigramCounts, r.bigramEndCounts, wordIds);
-                List<WordTriplet> triplets = toWordTriplets(r.trigramCounts, r.trigramEndCounts, wordIds);
-
-                if (!pairs.isEmpty()) {
-                    System.out.println("  Inserting " + pairs.size() + " word pairs...");
-                    try {
-                        db.bulkAddWordPairs(pairs);
-                    } catch (SQLException ex) {
-                        System.err.println("  bulkAddWordPairs failed: " + ex.getMessage());
-                        ex.printStackTrace();
-                    }
-                }
-
-                if (!triplets.isEmpty()) {
-                    System.out.println("  Inserting " + triplets.size() + " word triplets...");
-                    try {
-                        db.bulkAddWordTriplets(triplets);
-                    } catch (SQLException ex) {
-                        System.err.println("  bulkAddWordTriplets failed: " + ex.getMessage());
-                        ex.printStackTrace();
-                    }
-                }
-            }
-
+            List<WordPair> pairs = toWordPairs(globalBigrams, globalBiEndCounts, wordIds);
+            System.out.println("Prepared " + pairs.size() + " word pairs. Inserting...");
             try {
-                FeatureBuilder builder = new FeatureBuilder(db);
-                builder.buildAllSentenceFeatures();
+                db.bulkAddWordPairs(pairs);
+                System.out.println("Inserted bigrams.");
             } catch (SQLException ex) {
+                System.err.println("bulkAddWordPairs failed: " + ex.getMessage());
                 ex.printStackTrace();
             }
 
-
+            List<WordTriplet> triplets = toWordTriplets(globalTrigrams, globalTriEndCounts, wordIds);
+            System.out.println("Prepared " + pairs.size() + " word triplets. Inserting...");
+            try {
+                db.bulkAddWordTriplets(triplets);
+                System.out.println("Inserted Trigrams.");
+            } catch (SQLException ex) {
+                System.err.println("bulkAddWordTrigrams failed: " + ex.getMessage());
+                ex.printStackTrace();
+            }
 
         } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Vincent Phan
+     * Experimental. If we keep data local to every thread, we don't need to globally accumlate anything (words and sentences)
+     * and let each thread collect and the DB can handle reducing.
+     */
+    public void runStreaming(Path root) throws SQLException, IOException {
+        List<Path> files = listTextFiles(root);
+        logger.info("Import start for " + files.size() + " files.");
+
+        try {
+            Map<String, SourceFile> importedFiles = db.getAllSourceFiles();
+            for (Path file : files) {
+                if (importedFiles.containsKey(file.getFileName().toString())) {
+                    logger.info(file.getFileName() + " is already imported. Skipping file.");
+                    continue;
+                }
+                logger.info("Processing " + file.getFileName());
+
+                String text = Files.readString(file);
+                Tokenizer.Result r = Tokenizer.process(text, Tokenizer.Mode.ALL);
+
+                if (r.words.isEmpty()) {
+                    logger.warn(file.getFileName() + "has no words. Skipping file.");
+                    continue;
+                }
+
+                db.addWordsInBatch(r.words.values());
+                db.addSentencesInBatch(r.sentenceCounts.values());
+
+                Map<String, Integer> wordIds = db.getWordIds(r.words.values());
+
+
+                // Convert and insert bigrams immediately
+                List<WordPair> pairs = toWordPairs(r.bigramCounts, r.bigramEndCounts, wordIds);
+                if (!pairs.isEmpty()) db.bulkAddWordPairs(pairs);
+
+                // Convert and insert trigrams immediately
+                List<WordTriplet> trips = toWordTriplets(r.trigramCounts, r.trigramEndCounts, wordIds);
+                if (!trips.isEmpty()) db.bulkAddWordTriplets(trips);
+
+                db.addSourceFile(file.getFileName().toString(), r.tokens.size());
+
+                // Free memory explicitly
+                r.words.clear();
+                r.sentenceCounts.clear();
+                r.bigramCounts.clear();
+                r.bigramEndCounts.clear();
+                r.trigramCounts.clear();
+                r.trigramEndCounts.clear();
+
+                System.gc(); // optional force garbage collect
+            }
+
+            logger.info("Import complete");
+
+            logger.info("Extracting Features");
+            FeatureBuilder builder = new FeatureBuilder(db);
+            builder.buildAllSentenceFeatures();
+            logger.info("Importer Complete.");
+
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }

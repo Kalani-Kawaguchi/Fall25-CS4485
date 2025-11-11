@@ -121,10 +121,12 @@ public class Javafx extends Application {
                 //Kevin Tran
                 //Uses the shared DatabaseManager instance to import the file
                 boolean wordsOnly = false;
-                new ImporterCli(db).run(Path.of("data/clean"), wordsOnly);
+                new ImporterCli(db).runStreaming(Path.of("data/clean"));
 
             } catch (IOException e) {
                 e.printStackTrace();
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
             }
         } else {
             System.out.println("No file");

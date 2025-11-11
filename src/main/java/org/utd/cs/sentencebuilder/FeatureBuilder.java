@@ -22,7 +22,6 @@ public class FeatureBuilder {
     public FeatureBuilder(DatabaseManager db) throws SQLException {
         this.db = db;
         loadWordMappings();
-
         this.probEstimator = new ProbabilityEstimator(db, this.idToWord);
     }
 
@@ -45,10 +44,9 @@ public class FeatureBuilder {
         try {
             List<String> tokens = Tokenizer.tokenizeSentence(sentence.getText());
             int len = sentence.getTokenCount();
-
             if (tokens.isEmpty()) return;
-            for (int i = 0; i < len; i++) {
 
+            for (int i = 0; i < len; i++) {
                 String token = tokens.get(i);
                 boolean isLast = (i == len - 1);
 
@@ -57,53 +55,52 @@ public class FeatureBuilder {
                 String bigram = (i > 0) ? tokens.get(i - 1) + " " + token : token;
                 String trigram = (i > 1) ? tokens.get(i - 2) + " " + tokens.get(i - 1) + " " + token : bigram;
 
-                // --- Resolve word IDs safely ---
-                Integer id = wordToId.get(unigram);
-                if (id == null) {
-                    logger.warn("Unknown word '{}' encountered. Skipping feature generation for it.", token);
-                    continue;
-                }
-
-                Integer w3 = wordToId.get(tokens.get(i));             // current
+                Integer w3 = wordToId.get(tokens.get(i));
                 Integer w2 = (i > 0) ? wordToId.get(tokens.get(i - 1)) : null;
                 Integer w1 = (i > 1) ? wordToId.get(tokens.get(i - 2)) : null;
 
-                // --- Compute probabilities ---
-                double pEosWord = probEstimator.pEosGivenWord(id);
+                if (w3 == null) {
+                    logger.warn("Unknown word '{}' in sentence {}. Skipping.", token, sentence.getSentenceId());
+                    continue;
+                }
+
+                // Probability calculations
+                double pEosWord = probEstimator.pEosGivenWord(w3);
                 double pEosContext = probEstimator.pEosGivenContext(w1, w2, w3);
                 double pEosLength = probEstimator.pEosGivenLength(len);
 
-                // --- Convert to logits ---
+                // Features (logits)
                 double x1 = safeLogit(pEosContext);
                 double x2 = safeLogit(pEosWord);
                 double x3 = safeLogit(pEosLength);
-                // --- Build feature object ---
-                SentenceFeature feature = new SentenceFeature();
-                feature.setSentenceId(sentence.getSentenceId());
-                feature.setTokenIndex(i);
-                feature.setWord(token);
-                feature.setContextType(getContextType(i));
-                feature.setContextNgram(trigram);
-                feature.setSentenceLen(len);
-                feature.setpEosContext(pEosContext);
-                feature.setpEosWord(pEosWord);
-                feature.setpEosLength(pEosLength);
-                feature.setX1(x1);
-                feature.setX2(x2);
-                feature.setX3(x3);
-                feature.setLabel(isLast ? 1 : 0);
 
-                featureBatch.add(feature);
+                SentenceFeature feat = new SentenceFeature();
+                feat.setSentenceId(sentence.getSentenceId());
+                feat.setTokenIndex(i);
+                feat.setWord(token);
+                feat.setContextType(getContextType(i));
+                feat.setContextNgram(trigram);
+                feat.setSentenceLen(len);
+                feat.setpEosContext(pEosContext);
+                feat.setpEosWord(pEosWord);
+                feat.setpEosLength(pEosLength);
+                feat.setX1(x1);
+                feat.setX2(x2);
+                feat.setX3(x3);
+                feat.setLabel(isLast ? 1 : 0);
 
-                // Batch flush
-                if (featureBatch.size() >= BATCH_SIZE) {
-                    db.bulkAddSentenceFeatures(featureBatch);
-                    featureBatch.clear();
-                }
+                featureBatch.add(feat);
+                if (featureBatch.size() >= BATCH_SIZE) flushBatch();
             }
         } catch (Exception e) {
             logger.error("Error processing sentence ID {}: {}", sentence.getSentenceId(), e.getMessage(), e);
         }
+    }
+
+    private void flushBatch() throws SQLException {
+        if (featureBatch.isEmpty()) return;
+        db.bulkAddSentenceFeatures(featureBatch);
+        featureBatch.clear();
     }
 
     private static double safeLogit(double p) {
