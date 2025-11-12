@@ -186,6 +186,7 @@ public class ImporterCli {
 
                 db.addWordsInBatch(r.words.values());
                 db.addSentencesInBatch(r.sentenceCounts.values());
+                db.addSentenceLengthsInBatch(r.sentenceLengthCounts);
 
                 Map<String, Integer> wordIds = db.getWordIds(r.words.values());
 
@@ -211,9 +212,11 @@ public class ImporterCli {
                 System.gc(); // optional force garbage collect
             }
 
+            db.recomputeLengthHazards();
             logger.info("Import complete");
 
             logger.info("Extracting Features");
+            //should be called by itself after importer rather than inside importer.
             FeatureBuilder builder = new FeatureBuilder(db);
             builder.buildAllSentenceFeatures();
             logger.info("Importer Complete.");

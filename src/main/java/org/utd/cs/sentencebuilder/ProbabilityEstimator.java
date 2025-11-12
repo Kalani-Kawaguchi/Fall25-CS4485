@@ -14,7 +14,7 @@ public class ProbabilityEstimator {
     private final Map<String, Double> bigramCache;
 
     public ProbabilityEstimator(DatabaseManager db, Map<Integer, Word> wordCache) {
-        this(db, wordCache, 10_000); // default cache size
+        this(db, wordCache, 100_000); // default cache size
     }
 
     public ProbabilityEstimator(DatabaseManager db, Map<Integer, Word> wordCache, int cacheSize) {
@@ -80,8 +80,7 @@ public class ProbabilityEstimator {
         return 0.5; // Final fallback
     }
 
-    public double pEosGivenLength(int length) {
-        // simple sigmoid approximation
-        return 1.0 / (1.0 + Math.exp(-(length - 10) / 5.0));
+    public double pEosGivenLength(int length) throws SQLException {
+        return db.getEosProbabilityGivenLength(length);
     }
 }

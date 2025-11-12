@@ -131,6 +131,15 @@ public class DatabaseManager {
                 "UNIQUE KEY uk_sentence_hash (sentence_hash)" + //for uniqueness and searching
                 ")";
 
+        String createSentenceHistogram = """
+                CREATE TABLE sentence_histogram(
+                sentence_length INT NOT NULL PRIMARY KEY,
+                frequency INT NOT NULL DEFAULT 0,
+                tail_count BIGINT DEFAULT 0,
+                hazard DOUBLE DEFAULT 0.0
+                )
+                """;
+
         // Do not try to normalize or use references for this table.
         String createSentenceFeatureTable =
                 "CREATE TABLE IF NOT EXISTS sentence_features (" +
@@ -163,6 +172,8 @@ public class DatabaseManager {
             logger.info("Table 'trigram_sequence' created or already exists.");
             stmt.execute(createSentenceTable);
             logger.info("Table 'sentences' created or already exists.");
+            stmt.execute(createSentenceHistogram);
+            logger.info("Table 'sentence_histogram' created or already exists.");
             stmt.execute(createSentenceFeatureTable);
             logger.info("Table 'sentence_features' created or already exists.");
             logger.info("Database build complete.");
@@ -305,6 +316,46 @@ public class DatabaseManager {
             }
         }
     }
+
+    /**
+     * Takes a map of {sentence_length -> frequency} and inserts or updates
+     * the counts in the database in a single batch.
+     *
+     * @param lengthHistogram A map where the key is the sentence length
+     * and the value is the count to add for that length.
+     * @throws SQLException if a database access error occurs.
+     */
+    public void addSentenceLengthsInBatch(Map<Integer, Integer> lengthHistogram) throws SQLException {
+        if (lengthHistogram == null || lengthHistogram.isEmpty()) {
+            logger.info("Sentence length histogram map is empty. No action taken.");
+            return;
+        }
+        logger.info("Executing batch insert/update for " + lengthHistogram.size() + " histogram entries.");
+
+        String sql = "INSERT INTO sentence_histogram (sentence_length, frequency) " +
+                "VALUES (?, ?) " +
+                "ON DUPLICATE KEY UPDATE " +
+                "frequency = frequency + VALUES(frequency)";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            for (Map.Entry<Integer, Integer> entry : lengthHistogram.entrySet()) {
+                Integer sentenceLength = entry.getKey();
+                Integer countToAdd = entry.getValue();
+
+                pstmt.setInt(1, sentenceLength);
+                pstmt.setInt(2, countToAdd);
+                pstmt.addBatch();
+            }
+
+            // Execute all statements in the batch
+            pstmt.executeBatch();
+            logger.info("Batch execution for histogram update complete.");
+        }
+    }
+
+
 
     /**
      * Inserts a new word or updates its counts if it already exists.
@@ -747,27 +798,6 @@ public class DatabaseManager {
         }
     }
 
-    /**
-     * Retrieves the probability P(EOS | word) for a given word ID.
-     *
-     * @param wordId The word's unique identifier.
-     * @return The probability that the word ends a sentence.
-     * @throws SQLException if a database access error occurs.
-     */
-    public double getWordEndProbability(int wordId) throws SQLException {
-        String sql = """
-        SELECT CAST(end_sequence_count AS DOUBLE) / total_occurrences AS prob
-        FROM words WHERE word_id = ?
-        """;
-        try (Connection conn = getConnect();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setInt(1, wordId);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) return rs.getDouble("prob");
-            }
-        }
-        return 0.0;
-    }
 
     public double getUnigramEndProbability(int w1) throws SQLException {
         String sql = """
@@ -832,21 +862,63 @@ public class DatabaseManager {
         return 0.0;
     }
 
-    /**
-     * Computes the average sentence length across all sentences in the corpus.
-     *
-     * @return The mean token count across all sentences.
-     * @throws SQLException if a database access error occurs.
-     */
-    public double getAverageSentenceLength() throws SQLException {
-        String sql = "SELECT AVG(token_count) AS avg_len FROM sentences";
+    public double getEosProbabilityGivenLength(int length) throws SQLException {
+        String sql = """
+        SELECT hazard FROM sentence_histogram
+        WHERE sentence_length = ?
+    """;
+
         try (Connection conn = getConnect();
-             PreparedStatement pstmt = conn.prepareStatement(sql);
-             ResultSet rs = pstmt.executeQuery()) {
-            if (rs.next()) return rs.getDouble("avg_len");
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, length);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getDouble("hazard");
+                }
+            }
         }
-        return 0.0;
+
+        // Fallback: get nearest longer length if not present
+        return getNearestEosProbabilityGivenLength(length);
     }
+
+    public double getNearestEosProbabilityGivenLength(int length) throws SQLException {
+        String sql = """
+        SELECT hazard
+        FROM sentence_histogram
+        WHERE sentence_length > ?
+        ORDER BY sentence_length ASC
+        LIMIT 1
+    """;
+
+        try (Connection conn = getConnect();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, length);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getDouble("hazard");
+                }
+            }
+        }
+
+        // Default fallback if we’re longer than any recorded sentence
+        return 1e-4; // Very low end probability
+    }
+
+    public void recomputeLengthHazards() throws SQLException {
+        String sql = "WITH hist AS (SELECT sentence_length, frequency, " +
+                "SUM(frequency) OVER (ORDER BY sentence_length DESC) AS tail_count " +
+                "FROM sentence_histogram) " +
+                "UPDATE sentence_histogram h " +
+                "JOIN hist ON h.sentence_length = hist.sentence_length " +
+                "SET h.tail_count = hist.tail_count, " +
+                "h.hazard = CASE WHEN hist.tail_count > 0 THEN hist.frequency / hist.tail_count ELSE 0 END;";
+        try (Connection conn = getConnect();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.executeUpdate();
+        }
+    }
+
 
     /**
      * Retrieves all sentence IDs from the database.
