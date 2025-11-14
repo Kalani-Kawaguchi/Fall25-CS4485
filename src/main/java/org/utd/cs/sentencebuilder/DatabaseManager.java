@@ -63,7 +63,7 @@ public class DatabaseManager {
         }
     }
 
-    private Connection getConnect() throws SQLException {
+    public Connection getConnect() throws SQLException {
         return dataSource.getConnection();
     }
 
@@ -74,9 +74,6 @@ public class DatabaseManager {
 
 
 
-    public Connection getConnection() throws SQLException {
-        return getConnect();
-    }
 
     /**
      * Creates the database schema.
