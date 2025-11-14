@@ -34,29 +34,47 @@ package org.utd.cs.sentencebuilder;
 import java.util.List;
 
 public class RunGeneratorCli {
-    public static void main(String[] args) {
-        // Options you can tweak
-        int max = 20;                       // default cap
-        String stop = null;                 // e.g. "oz" to stop when "oz" appears
-        List<String> seed = List.of();      // e.g. List.of("the")
 
-        // Parse simple flags: --max=25 --stop=oz --seed=the
+    public static void main(String[] args) {
+
+        // ----- Defaults -----
+        String algo = "greedy";        // greedy | weighted
+        int max = 20;
+        String stop = null;
+        List<String> seed = List.of();
+
+        // ----- Parse flags -----
         for (String a : args) {
-            if (a.startsWith("--max="))  max = Integer.parseInt(a.substring(6));
-            else if (a.startsWith("--stop=")) stop = a.substring(7).toLowerCase();
-            else if (a.startsWith("--seed=")) seed = List.of(a.substring(7).toLowerCase());
+            if (a.startsWith("--algo="))       algo = a.substring(7).toLowerCase();
+            else if (a.startsWith("--max="))   max = Integer.parseInt(a.substring(6));
+            else if (a.startsWith("--stop="))  stop = a.substring(7).toLowerCase();
+            else if (a.startsWith("--seed="))  seed = List.of(a.substring(7).toLowerCase());
         }
 
-        BigramGreedyGenerator gen = new BigramGreedyGenerator();
-        gen.loadData(); // optional, generate* will do it if not called
+        // ----- Pick the generator -----
+        SentenceGenerator gen;
 
-        String s = seed.isEmpty()
+        switch (algo) {
+            case "weighted":
+                gen = new BigramWeightedGenerator();
+                break;
+            case "greedy":
+            default:
+                gen = new BigramGreedyGenerator();
+                break;
+        }
+
+        gen.loadData(); // ensures DB fetch performed once
+
+        // ----- Generate sentence -----
+        String output = seed.isEmpty()
                 ? gen.generateSentence(max, stop)
                 : gen.generateSentence(seed, max, stop);
-        System.out.println("\n--- Generated ---");
-        System.out.println(s);
-        System.out.println("(len=" + s.split("\\s+").length + ", max=" + max +
-                        (stop != null ? ", stop=" + stop : "") + ")");
+
+        // ----- Print output -----
+        System.out.println("\n--- Generated (" + algo + ") ---");
+        System.out.println(output);
+        System.out.println("(tokens=" + output.split("\\s+").length + ", max=" + max + (stop != null ? ", stop=" + stop : "") + ", algo=" + algo + ")");
 
     }
 }
