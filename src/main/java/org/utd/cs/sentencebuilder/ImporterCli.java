@@ -34,18 +34,16 @@ import java.util.stream.Collectors;
  */
 public class ImporterCli {
 
-    public static void main(String[] args) {
-        boolean wordsOnly = Arrays.asList(args).contains("--words-only");
-        Path root = Arrays.stream(args)
-                .filter(a -> !a.startsWith("--"))
-                .findFirst()
-                .map(Path::of)
-                .orElse(Path.of("data/clean"));
+    private final DatabaseManager db;
 
+    public ImporterCli(DatabaseManager db) {
+        this.db = db;
+    }
+
+    public void run(Path root, boolean wordsOnly) {
         System.out.println("Scanning: " + root.toAbsolutePath());
         System.out.println("Mode: " + (wordsOnly ? "WORDS ONLY" : "WORDS + BIGRAMS"));
 
-        DatabaseManager db = null;
         try {
             List<Path> files = listTextFiles(root);
             if (files.isEmpty()) {
@@ -53,14 +51,31 @@ public class ImporterCli {
                 return;
             }
 
-            db = new DatabaseManager();
+            // Get already-imported files
+            Map<String, SourceFile> importedFilesMap;
+            try {
+                importedFilesMap = db.getAllSourceFiles();
+                System.out.println("Found " + importedFilesMap.size() + " files already in database.");
+            } catch (SQLException e) {
+                System.err.println("CRITICAL: Could not retrieve existing file list from database. Aborting.");
+                e.printStackTrace();
+                return;
+            }
 
-            // Accumulate across ALL files (we resolve IDs once at the end)
             Map<String, Word> globalWords = new HashMap<>();
-            Map<String, Map<String, Integer>> globalBigrams = new HashMap<>();
+            Map<String, Integer> globalBigrams = new HashMap<>();
+            Map<String, Integer> globalTrigrams = new HashMap<>();
+            Map<String, Integer> globalBiEndCounts = new HashMap<>();
+            Map<String, Integer> globalTriEndCounts = new HashMap<>();
 
+            // ---- PER-FILE PASS ----
             for (Path p : files) {
                 System.out.println("\n--- Processing: " + p.getFileName() + " ---");
+
+                if (importedFilesMap.containsKey(p.getFileName().toString())) {
+                    System.out.println("File already imported.");
+                    continue; // Skip this file
+                }
 
                 String text = Files.readString(p);
                 Tokenizer.Result r = Tokenizer.process(text);
@@ -80,17 +95,21 @@ public class ImporterCli {
                 } catch (SQLException ex) {
                     System.err.println("addWordsInBatch failed for " + p.getFileName() + ": " + ex.getMessage());
                     ex.printStackTrace();
-                    // continue to next file
-                    continue;
+                    continue; // move to next file
                 }
 
                 // accumulate into global aggregates for one-time ID resolution
                 mergeWords(globalWords, r.words);
                 if (!wordsOnly) {
-                    mergeBigrams(globalBigrams, r.bigramCounts);
+                    mergeCounts(globalBigrams, r.bigramCounts);
+                    mergeCounts(globalTrigrams, r.trigramCounts);
+
+                    mergeCounts(globalBiEndCounts, r.bigramEndCounts);
+                    mergeCounts(globalTriEndCounts, r.trigramEndCounts);
                 }
             }
 
+            // ---- AFTER LOOP: finalize inserts ----
             if (globalWords.isEmpty()) {
                 System.out.println("\nNothing to insert (no words collected).");
                 return;
@@ -101,7 +120,6 @@ public class ImporterCli {
                 return;
             }
 
-            // ---- BIGRAMS PATH ----
             // Resolve word IDs once across the global set
             Map<String, Integer> wordIds;
             try {
@@ -113,8 +131,7 @@ public class ImporterCli {
                 return;
             }
 
-            // Convert (prev->next->count) into WordPair objects with IDs and insert
-            List<WordPair> pairs = toWordPairs(globalBigrams, wordIds);
+            List<WordPair> pairs = toWordPairs(globalBigrams, globalBiEndCounts, wordIds);
             System.out.println("Prepared " + pairs.size() + " word pairs. Inserting...");
             try {
                 db.bulkAddWordPairs(pairs);
@@ -124,14 +141,39 @@ public class ImporterCli {
                 ex.printStackTrace();
             }
 
-            System.out.println("\nDone.");
+            List<WordTriplet> triplets = toWordTriplets(globalTrigrams, globalTriEndCounts, wordIds);
+            System.out.println("Prepared " + pairs.size() + " word triplets. Inserting...");
+            try {
+                db.bulkAddWordTriplets(triplets);
+                System.out.println("Inserted Trigrams.");
+            } catch (SQLException ex) {
+                System.err.println("bulkAddWordTrigrams failed: " + ex.getMessage());
+                ex.printStackTrace();
+            }
+
         } catch (IOException e) {
             e.printStackTrace();
+        }
+    }
+
+
+    public static void main(String[] args) {
+        boolean wordsOnly = Arrays.asList(args).contains("--words-only");
+        Path root = Arrays.stream(args)
+                .filter(a -> !a.startsWith("--"))
+                .findFirst()
+                .map(Path::of)
+                .orElse(Path.of("data/clean"));
+
+        // CLI mode: create the pool once, run, then close it.
+        DatabaseManager db = new DatabaseManager();
+        try {
+            new ImporterCli(db).run(root, wordsOnly);
         } finally {
-            // always release the pool cleanly
             DatabaseManager.closeDataSource();
         }
     }
+
 
     private static List<Path> listTextFiles(Path root) throws IOException {
         if (!Files.exists(root)) return List.of();
@@ -162,33 +204,68 @@ public class ImporterCli {
         }
     }
 
-    private static void mergeBigrams(Map<String, Map<String,Integer>> target,
-                                     Map<String, Map<String,Integer>> src) {
+    private static void mergeCounts(Map<String,Integer> target, Map<String,Integer> src) {
         for (var e : src.entrySet()) {
-            String prev = e.getKey();
-            Map<String,Integer> intoRow = target.computeIfAbsent(prev, k -> new HashMap<>());
-            for (var n : e.getValue().entrySet()) {
-                intoRow.merge(n.getKey(), n.getValue(), Integer::sum);
-            }
+            target.merge(e.getKey(), e.getValue(), Integer::sum);
         }
     }
 
-    private static List<WordPair> toWordPairs(Map<String, Map<String,Integer>> bigrams,
-                                              Map<String,Integer> wordIds) {
+    private static List<WordPair> toWordPairs(Map<String,Integer> bigrams,
+                                              Map<String,Integer> bigramEndCounts,
+                                              Map<String, Integer> wordIds) {
         List<WordPair> out = new ArrayList<>();
-        for (var prevEntry : bigrams.entrySet()) {
-            Integer prevId = wordIds.get(prevEntry.getKey());
-            if (prevId == null) continue;
-            for (var nextEntry : prevEntry.getValue().entrySet()) {
-                Integer nextId = wordIds.get(nextEntry.getKey());
-                if (nextId == null) continue;
-                WordPair wp = new WordPair();
-                wp.setPrecedingWordId(prevId);
-                wp.setFollowingWordId(nextId);
-                wp.setOccurrenceCount(nextEntry.getValue());
-                out.add(wp);
-            }
+
+        for (var entry : bigrams.entrySet()) {
+            String bigramKey = entry.getKey();
+
+            String[] parts = entry.getKey().split(" ");
+            if (parts.length != 2) continue;  // sanity check
+
+            Integer firstId = wordIds.get(parts[0]);
+            Integer secondId = wordIds.get(parts[1]);
+            if (firstId == null || secondId == null) continue;
+
+            int biEndFrequency = bigramEndCounts.getOrDefault(bigramKey, 0);
+
+            WordPair wp = new WordPair();
+            wp.setPrecedingWordId(firstId);
+            wp.setFollowingWordId(secondId);
+            wp.setOccurrenceCount(entry.getValue());
+            wp.setEndFrequency(biEndFrequency);
+            out.add(wp);
         }
         return out;
     }
+
+
+    //vincentphan
+    private static List<WordTriplet> toWordTriplets(Map<String,Integer> trigrams,
+                                                    Map<String, Integer> trigramEndCounts,
+                                                    Map<String,Integer> wordIds) {
+        List<WordTriplet> out = new ArrayList<>();
+
+        for (var entry : trigrams.entrySet()) {
+            String trigramKey = entry.getKey();
+
+            String[] parts = entry.getKey().split(" ");
+            if (parts.length != 3) continue;  // sanity check
+
+            Integer firstId = wordIds.get(parts[0]);
+            Integer secondId = wordIds.get(parts[1]);
+            Integer thirdId = wordIds.get(parts[2]);
+            if (firstId == null || secondId == null || thirdId == null) continue;
+
+            int triEndFrequency = trigramEndCounts.getOrDefault(trigramKey, 0);
+
+            WordTriplet wt = new WordTriplet();
+            wt.setFirstWordId(firstId);
+            wt.setSecondWordId(secondId);
+            wt.setThirdWordId(thirdId);
+            wt.setOccurrenceCount(entry.getValue());
+            wt.setEndFrequency(triEndFrequency);
+            out.add(wt);
+        }
+        return out;
+    }
+
 }
