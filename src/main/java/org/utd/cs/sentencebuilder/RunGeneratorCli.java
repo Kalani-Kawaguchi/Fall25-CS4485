@@ -26,7 +26,19 @@
  *  # run with a stop word and length cap
  *  mvn -q -DskipTests exec:java -Dexec.mainClass=org.utd.cs.sentencebuilder.RunGeneratorCli \
  *   -Dexec.args="--max=30 --stop=oz"
- *
+ * 
+ *  # run (no seed, weighted)
+ *  mvn -q -DskipTests exec:java -Dexec.mainClass=org.utd.cs.sentencebuilder.RunGeneratorCli
+ *   -Dexec.args="--algo=weighted"
+ * 
+ *  # run with a seed
+ *  mvn -q -DskipTests exec:java -Dexec.mainClass=org.utd.cs.sentencebuilder.RunGeneratorCli \
+ *   -Dexec.args="--algo=weighted --seed=the"
+ * 
+ *  # run with a stop word and length cap
+ *  mvn -q -DskipTests exec:java -Dexec.mainClass=org.utd.cs.sentencebuilder.RunGeneratorCli \
+ *   -Dexec.args="--algo=weighted --seed=the --max=25 --stop=oz
+ * 
  */
 
 package org.utd.cs.sentencebuilder;
@@ -38,7 +50,7 @@ public class RunGeneratorCli {
     public static void main(String[] args) {
 
         // ----- Defaults -----
-        String algo = "greedy";        // greedy | weighted
+        String algo = "greedy";        // greedy | weighted | bi_greedy | bi_weighted
         int max = 20;
         String stop = null;
         List<String> seed = List.of();
@@ -55,12 +67,18 @@ public class RunGeneratorCli {
         SentenceGenerator gen;
 
         switch (algo) {
-            case "weighted":
+            case "bi_weighted":
                 gen = new BigramWeightedGenerator();
                 break;
-            case "greedy":
-            default:
+            case "bi_greedy":
                 gen = new BigramGreedyGenerator();
+                break;
+            case "weighted":    // new Weighted Generation w/ Trigram       - Renz
+                gen = new TrigramWeightedGenerator();
+                break;
+            case "greedy":      // new Greedy Generation w/ Trigram         - Renz
+            default:
+                gen = new TrigramGreedyGenerator();
                 break;
         }
 
