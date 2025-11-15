@@ -16,6 +16,7 @@ package org.utd.cs.sentencebuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
 import java.sql.SQLException;
@@ -217,8 +218,13 @@ public class ImporterCli {
 
             logger.info("Extracting Features");
             //should be called by itself after importer rather than inside importer.
-            FeatureBuilder builder = new FeatureBuilder(db);
-            builder.buildAllSentenceFeatures();
+            //FeatureBuilder builder = new FeatureBuilder(db);
+            //builder.buildAllSentenceFeatures();
+            File modelSavePath = new File("data/model/model.json");
+            List<SentenceFeature> dataset = db.getAllSentenceFeatures();
+            LogisticRegressionEOS model = new LogisticRegressionEOS(0.1, 2_500, 0.05);
+            model.fit(dataset);
+            model.saveModel(modelSavePath);
             logger.info("Importer Complete.");
 
         } catch (Exception e) {

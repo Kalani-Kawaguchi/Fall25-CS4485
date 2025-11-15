@@ -798,19 +798,47 @@ public class DatabaseManager {
         }
     }
 
+    /**
+     * Retrieves all sentence feature records from the database.
+     *
+     * @return A List of all SentenceFeature objects.
+     * @throws SQLException if a database access error occurs.
+     */
+    public List<SentenceFeature> getAllSentenceFeatures() throws SQLException {
+        logger.info("Retrieving all sentence features from database.");
+        String sql = "SELECT * FROM sentence_features";
+        List<SentenceFeature> features = new ArrayList<>();
 
-    public double getUnigramEndProbability(int w1) throws SQLException {
-        String sql = """
-        SELECT CASE
-            WHEN total_occurrences > 0
-            THEN CAST(end_sequence_count AS DOUBLE) / total_occurrences
-            ELSE 0.0
-        END AS prob
-        FROM words
-        WHERE word_id = ?
-        """;
+        try (Connection conn = getConnect();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
 
-        return 0.0;
+            while (rs.next()) {
+                SentenceFeature f = new SentenceFeature();
+
+                f.setSentenceId(rs.getInt("sentence_id"));
+                f.setTokenIndex(rs.getInt("token_index"));
+                f.setWord(rs.getString("word"));
+                f.setContextType(rs.getString("context_type"));
+                f.setContextNgram(rs.getString("context_ngram"));
+                f.setSentenceLen(rs.getInt("sentence_len"));
+                f.setpEosContext(rs.getDouble("p_eos_context"));
+                f.setpEosWord(rs.getDouble("p_eos_word"));
+                f.setpEosLength(rs.getDouble("p_eos_length"));
+                f.setX1(rs.getDouble("x1"));
+                f.setX2(rs.getDouble("x2"));
+                f.setX3(rs.getDouble("x3"));
+                f.setLabel(rs.getInt("label"));
+
+                features.add(f);
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to retrieve sentence features.", e);
+            throw e; // Re-throw the exception
+        }
+
+        logger.info("Successfully retrieved {} sentence features.", features.size());
+        return features;
     }
 
     /**
@@ -919,42 +947,6 @@ public class DatabaseManager {
         }
     }
 
-
-    /**
-     * Retrieves all sentence IDs from the database.
-     *
-     * @return A list of sentence IDs.
-     * @throws SQLException if a database access error occurs.
-     */
-    public List<Integer> getAllSentenceIds() throws SQLException {
-        List<Integer> ids = new ArrayList<>();
-        String sql = "SELECT sentence_id FROM sentences";
-        try (Connection conn = getConnect();
-             PreparedStatement pstmt = conn.prepareStatement(sql);
-             ResultSet rs = pstmt.executeQuery()) {
-            while (rs.next()) ids.add(rs.getInt("sentence_id"));
-        }
-        return ids;
-    }
-
-    /**
-     * Retrieves the text of a sentence given its ID.
-     *
-     * @param sentenceId The unique sentence identifier.
-     * @return The sentence text, or null if not found.
-     * @throws SQLException if a database access error occurs.
-     */
-    public String getSentenceText(int sentenceId) throws SQLException {
-        String sql = "SELECT text FROM sentences WHERE sentence_id = ?";
-        try (Connection conn = getConnect();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setInt(1, sentenceId);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) return rs.getString("text");
-            }
-        }
-        return null;
-    }
 
     /**
      * Deletes all data from all tables in the database.
