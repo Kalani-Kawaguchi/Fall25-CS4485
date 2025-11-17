@@ -15,20 +15,26 @@ public class FeatureBuilder {
 
     private final DatabaseManager db;
     private final ProbabilityEstimator probEstimator;
-    private Map<String, Integer> wordToId = new HashMap<>();
     private Map<Integer, Word> idToWord = new HashMap<>();
+    private Map<Integer, Map<Integer, Map<Integer, WordTriplet>>> idToTrigram = new HashMap<>();
+    private Map<Integer, Map<Integer, WordPair>> idToBigram = new HashMap<>();
+    private Map<String, Integer> wordToId = new HashMap<>();
+    private Map<Integer, Double> lengthHistogram = new HashMap<>();
     private List<SentenceFeature> featureBatch = new ArrayList<>();
 
     public FeatureBuilder(DatabaseManager db) throws SQLException {
         this.db = db;
         loadWordMappings();
-        this.probEstimator = new ProbabilityEstimator(db, this.idToWord);
+        this.probEstimator = new ProbabilityEstimator(idToWord, idToBigram, idToTrigram, lengthHistogram);
     }
 
     public void loadWordMappings() throws SQLException {
         logger.info("Loading word-to-ID mappings...");
         idToWord = db.getAllWords();
+        idToBigram = db.getAllWordPairs();
+        idToTrigram = db.getAllWordTriplets();
         wordToId = db.getWordIds();
+        lengthHistogram = db.getLengthProbabilityMap();
         logger.info("Loaded {} words into cache.", wordToId.size());
     }
 
@@ -99,7 +105,7 @@ public class FeatureBuilder {
 
     private void flushBatch() throws SQLException {
         if (featureBatch.isEmpty()) return;
-        db.bulkAddSentenceFeatures(featureBatch);
+        db.addSentenceFeaturesInBatch(featureBatch);
         featureBatch.clear();
     }
 
@@ -129,7 +135,7 @@ public class FeatureBuilder {
         // After all sentences are processed, flush any remaining features
         if (!featureBatch.isEmpty()) {
             logger.info("Flushing final batch of {} features.", featureBatch.size());
-            db.bulkAddSentenceFeatures(featureBatch);
+            db.addSentenceFeaturesInBatch(featureBatch);
             featureBatch.clear();
         }
         logger.info("Feature generation complete.");

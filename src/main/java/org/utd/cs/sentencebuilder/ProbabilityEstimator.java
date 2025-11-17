@@ -6,81 +6,73 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class ProbabilityEstimator {
-    private final DatabaseManager db;
     private final Map<Integer, Word> wordCache;
+    private final Map<Integer, Map<Integer, Map<Integer, WordTriplet>>> trigramMap;
+    private final Map<Integer, Map<Integer, WordPair>> bigramMap;
+    private final Map<Integer, Double> lengthProbs;
 
-    // --- LRU caches for probability lookups ---
-    private final Map<String, Double> trigramCache;
-    private final Map<String, Double> bigramCache;
+    private final double P_EOS_UNKNOWN_UNIGRAM;
+    private final double P_EOS_UNKNOWN_LENGTH;
 
-    public ProbabilityEstimator(DatabaseManager db, Map<Integer, Word> wordCache) {
-        this(db, wordCache, 100_000); // default cache size
-    }
-
-    public ProbabilityEstimator(DatabaseManager db, Map<Integer, Word> wordCache, int cacheSize) {
-        this.db = db;
+    public ProbabilityEstimator(Map<Integer, Word> wordCache,
+                                Map<Integer, Map<Integer, WordPair>> bigramMap,
+                                Map<Integer, Map<Integer, Map<Integer, WordTriplet>>> trigramMap,
+                                Map<Integer, Double> lengthProbs) {
         this.wordCache = wordCache;
+        this.bigramMap = bigramMap;
+        this.trigramMap = trigramMap;
+        this.lengthProbs = lengthProbs;
 
-        // Build simple LRU caches
-        this.trigramCache = new LinkedHashMap<>(cacheSize, 0.75f, true) {
-            @Override protected boolean removeEldestEntry(Map.Entry<String, Double> e) {
-                return size() > cacheSize;
-            }
-        };
-        this.bigramCache = new LinkedHashMap<>(cacheSize, 0.75f, true) {
-            @Override protected boolean removeEldestEntry(Map.Entry<String, Double> e) {
-                return size() > cacheSize;
-            }
-        };
+        // A smarter version could calculate the average P(EOS) from the maps
+        this.P_EOS_UNKNOWN_UNIGRAM = 0.5;
+        this.P_EOS_UNKNOWN_LENGTH = 0.5;
     }
 
-    public double pEosGivenWord(int id) throws SQLException {
+
+    public double pEosGivenWord(int id) {
         Word w = wordCache.get(id);
-        if (w == null) return 0.5;
+        if (w == null) return P_EOS_UNKNOWN_UNIGRAM;
         return (w.getEndSequenceCount() + 1.0) / (w.getTotalOccurrences() + 2.0);
     }
 
-    public double pEosGivenContext(Integer w1, Integer w2, Integer w3) throws SQLException {
+    public double pEosGivenContext(Integer w1, Integer w2, Integer w3) {
 
         // 1. Try Trigram
         if (w1 != null && w2 != null && w3 != null) {
-            String key = w1 + "_" + w2 + "_" + w3;
-            // This will query the DB only if the key is not in the cache.
-            double prob = trigramCache.computeIfAbsent(key, k -> {
-                try {
-                    return db.getTrigramEndProbability(w1, w2, w3);
-                } catch (SQLException e) {
-                    return 0.0;
+            Map<Integer, Map<Integer, WordTriplet>> midMap = trigramMap.get(w1);
+            if (midMap != null) {
+                Map<Integer, WordTriplet> innerMap = midMap.get(w2);
+                if (innerMap != null) {
+                    WordTriplet triplet = innerMap.get(w3);
+                    if (triplet != null) {
+                        // Found triplet, calculate probability
+                        return (triplet.getEndFrequency() + 1.0) / (triplet.getOccurrenceCount() + 2.0);
+                    }
                 }
-            });
-
-            if (prob > 0.0) return prob;
+            }
         }
 
         // 2. Try Bigram (Backoff)
         if (w2 != null && w3 != null) {
-            String key = w2 + "_" + w3;
-
-            double prob = bigramCache.computeIfAbsent(key, k -> {
-                try {
-                    return db.getBigramEndProbability(w2, w3);
-                } catch (SQLException e) {
-                    return 0.0;
+            Map<Integer, WordPair> innerMap = bigramMap.get(w2);
+            if (innerMap != null) {
+                WordPair pair = innerMap.get(w3);
+                if (pair != null) {
+                    // Found bigram, calculate probability
+                    return (pair.getEndFrequency() + 1.0) / (pair.getOccurrenceCount() + 2.0);
                 }
-            });
-
-            if (prob > 0.0) return prob;
+            }
         }
 
         // 3. Try Unigram (Backoff)
         if (w3 != null) {
-            double prob = this.pEosGivenWord(w3);
-            if (prob > 0.0) return prob;
+            return this.pEosGivenWord(w3);
         }
-        return 0.5; // Final fallback
+
+        return P_EOS_UNKNOWN_UNIGRAM; // Final fallback
     }
 
-    public double pEosGivenLength(int length) throws SQLException {
-        return db.getEosProbabilityGivenLength(length);
+    public double pEosGivenLength(int length) {
+        return lengthProbs.getOrDefault(length, P_EOS_UNKNOWN_LENGTH);
     }
 }

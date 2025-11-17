@@ -137,7 +137,7 @@ public class ImporterCli {
             List<WordPair> pairs = toWordPairs(globalBigrams, globalBiEndCounts, wordIds);
             System.out.println("Prepared " + pairs.size() + " word pairs. Inserting...");
             try {
-                db.bulkAddWordPairs(pairs);
+                db.addWordPairsInBatch(pairs);
                 System.out.println("Inserted bigrams.");
             } catch (SQLException ex) {
                 System.err.println("bulkAddWordPairs failed: " + ex.getMessage());
@@ -147,7 +147,7 @@ public class ImporterCli {
             List<WordTriplet> triplets = toWordTriplets(globalTrigrams, globalTriEndCounts, wordIds);
             System.out.println("Prepared " + pairs.size() + " word triplets. Inserting...");
             try {
-                db.bulkAddWordTriplets(triplets);
+                db.addWordTripletsInBatch(triplets);
                 System.out.println("Inserted Trigrams.");
             } catch (SQLException ex) {
                 System.err.println("bulkAddWordTrigrams failed: " + ex.getMessage());
@@ -194,11 +194,11 @@ public class ImporterCli {
 
                 // Convert and insert bigrams immediately
                 List<WordPair> pairs = toWordPairs(r.bigramCounts, r.bigramEndCounts, wordIds);
-                if (!pairs.isEmpty()) db.bulkAddWordPairs(pairs);
+                if (!pairs.isEmpty()) db.addWordPairsInBatch(pairs);
 
                 // Convert and insert trigrams immediately
                 List<WordTriplet> trips = toWordTriplets(r.trigramCounts, r.trigramEndCounts, wordIds);
-                if (!trips.isEmpty()) db.bulkAddWordTriplets(trips);
+                if (!trips.isEmpty()) db.addWordTripletsInBatch(trips);
 
                 db.addSourceFile(file.getFileName().toString(), r.tokens.size());
 

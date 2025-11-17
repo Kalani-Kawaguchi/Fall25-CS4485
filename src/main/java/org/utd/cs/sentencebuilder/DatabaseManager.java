@@ -649,7 +649,7 @@ public class DatabaseManager {
      * @param wordPairs A collection of WordPair objects to be added or updated.
      * @throws SQLException if a database access error occurs.
      */
-    public void bulkAddWordPairs(Collection<WordPair> wordPairs) throws SQLException {
+    public void addWordPairsInBatch(Collection<WordPair> wordPairs) throws SQLException {
         String sql = "INSERT INTO word_pairs (preceding_word_id, following_word_id, bi_occurrence_count, bi_end_frequency) " +
                 "VALUES (?, ?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE " +
@@ -678,14 +678,18 @@ public class DatabaseManager {
     }
 
     /**
-     * Retrieves all word pairs from the database as a collection of WordPair objects.
+     * Retrieves all word pairs from the database as a nested Map
+     * for efficient lookups: Map<PrecedingID, Map<FollowingID, WordPair>>
      *
-     * @return A Collection of all WordPair objects from the database.
+     * This replaces the previous implementation that returned a Collection.
+     *
+     * @return A nested Map structure of all word pairs.
      * @throws SQLException if a database access error occurs.
      */
-    public Collection<WordPair> getAllWordPairs() throws SQLException {
-        logger.info("Retrieving all word pair objects from the database.");
-        Collection<WordPair> allPairs = new ArrayList<>();
+    public Map<Integer, Map<Integer, WordPair>> getAllWordPairs() throws SQLException {
+        logger.info("Retrieving all word pairs as a nested map.");
+        // The outer map. Key: precedingWordId
+        Map<Integer, Map<Integer, WordPair>> nestedPairMap = new HashMap<>();
         String sql = "SELECT sequence_id, preceding_word_id, following_word_id, bi_occurrence_count, bi_end_frequency FROM word_pairs";
 
         try (Connection conn = getConnect();
@@ -694,20 +698,32 @@ public class DatabaseManager {
 
             while (rs.next()) {
                 WordPair pair = new WordPair();
+                int precedingId = rs.getInt("preceding_word_id");
+                int followingId = rs.getInt("following_word_id");
+
                 pair.setSequenceId(rs.getInt("sequence_id"));
-                pair.setPrecedingWordId(rs.getInt("preceding_word_id"));
-                pair.setFollowingWordId(rs.getInt("following_word_id"));
+                pair.setPrecedingWordId(precedingId);
+                pair.setFollowingWordId(followingId);
                 pair.setOccurrenceCount(rs.getInt("bi_occurrence_count"));
                 pair.setEndFrequency(rs.getInt("bi_end_frequency"));
-                allPairs.add(pair);
+
+                // Get the inner map for this precedingId.
+                // If it doesn't exist, create it and put it in the outer map.
+                Map<Integer, WordPair> innerMap = nestedPairMap.computeIfAbsent(
+                        precedingId,
+                        k -> new HashMap<>()
+                );
+
+                // Add the pair to the inner map.
+                innerMap.put(followingId, pair);
             }
         } catch (SQLException e) {
-            logger.error("Failed to retrieve all word pairs.", e);
+            logger.error("Failed to retrieve all word pairs for nested map.", e);
             throw e;
         }
 
-        logger.info("Successfully retrieved {} word pairs.", allPairs.size());
-        return allPairs;
+        logger.info("Successfully retrieved and mapped {} preceding word IDs.", nestedPairMap.size());
+        return nestedPairMap;
     }
 
     /**
@@ -716,7 +732,7 @@ public class DatabaseManager {
      * @param wordTriplets A collection of WordTriplet objects to be added or updated.
      * @throws SQLException if a database access error occurs.
      */
-    public void bulkAddWordTriplets(Collection<WordTriplet> wordTriplets) throws SQLException {
+    public void addWordTripletsInBatch(Collection<WordTriplet> wordTriplets) throws SQLException {
         String sql = "INSERT INTO trigram_sequence (first_word_id, second_word_id, third_word_id, tri_occurrence_count, tri_end_frequency) " +
                 "VALUES (?, ?, ?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE " +
@@ -747,13 +763,69 @@ public class DatabaseManager {
     }
 
     /**
+     * Retrieves all word triplets from the database as a doubly-nested Map
+     * for efficient lookups: Map<FirstID, Map<SecondID, Map<ThirdID, WordTriplet>>>
+     *
+     * @return A doubly-nested Map structure of all word triplets.
+     * @throws SQLException if a database access error occurs.
+     */
+    public Map<Integer, Map<Integer, Map<Integer, WordTriplet>>> getAllWordTriplets() throws SQLException {
+        logger.info("Retrieving all word triplets as a nested map.");
+        // The outer map. Key: firstWordId
+        Map<Integer, Map<Integer, Map<Integer, WordTriplet>>> nestedTripletMap = new HashMap<>();
+
+        // Assumed table/column names based on WordTriplet POJO
+        String sql = "SELECT sequence_id, first_word_id, second_word_id, third_word_id, tri_occurrence_count, tri_end_frequency FROM trigrams";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                WordTriplet triplet = new WordTriplet();
+                int firstId = rs.getInt("first_word_id");
+                int secondId = rs.getInt("second_word_id");
+                int thirdId = rs.getInt("third_word_id");
+
+                triplet.setSequenceId(rs.getInt("sequence_id"));
+                triplet.setFirstWordId(firstId);
+                triplet.setSecondWordId(secondId);
+                triplet.setThirdWordId(thirdId);
+                triplet.setOccurrenceCount(rs.getInt("tri_occurrence_count"));
+                triplet.setEndFrequency(rs.getInt("tri_end_frequency"));
+
+                // Get the middle map for this firstId.
+                Map<Integer, Map<Integer, WordTriplet>> middleMap = nestedTripletMap.computeIfAbsent(
+                        firstId,
+                        k -> new HashMap<>()
+                );
+
+                // Get the inner map for this secondId.
+                Map<Integer, WordTriplet> innerMap = middleMap.computeIfAbsent(
+                        secondId,
+                        k -> new HashMap<>()
+                );
+
+                // Add the triplet to the inner map.
+                innerMap.put(thirdId, triplet);
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to retrieve all word triplets for nested map.", e);
+            throw e;
+        }
+
+        logger.info("Successfully retrieved and mapped {} first word IDs.", nestedTripletMap.size());
+        return nestedTripletMap;
+    }
+
+    /**
      * Inserts or updates a batch of sentence feature records in the database.
      * Each feature corresponds to a token-level EOS prediction context.
      *
      * @param features The collection of SentenceFeature objects to insert.
      * @throws SQLException if a database access error occurs.
      */
-    public void bulkAddSentenceFeatures(Collection<SentenceFeature> features) throws SQLException {
+    public void addSentenceFeaturesInBatch(Collection<SentenceFeature> features) throws SQLException {
         logger.info("Inserting {} sentence features in batch.", features.size());
         //I forgot java had text blocks...
         String sql = """
@@ -945,6 +1017,37 @@ public class DatabaseManager {
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.executeUpdate();
         }
+    }
+
+    /**
+     * Retrieves the complete sentence length histogram as a Map
+     * Map<Length, P(EOS|Length)>
+     *
+     * @return A Map where Key = sentence_length and Value = hazard.
+     * @throws SQLException if a database access error occurs.
+     */
+    public Map<Integer, Double> getLengthProbabilityMap() throws SQLException {
+        logger.info("Retrieving sentence length probability histogram.");
+        Map<Integer, Double> lengthMap = new HashMap<>();
+        String sql = "SELECT sentence_length, hazard FROM sentence_histogram";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                lengthMap.put(
+                        rs.getInt("sentence_length"),
+                        rs.getDouble("hazard")
+                );
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to retrieve sentence length histogram.", e);
+            throw e;
+        }
+
+        logger.info("Successfully retrieved {} length/hazard pairs.", lengthMap.size());
+        return lengthMap;
     }
 
 
