@@ -218,8 +218,8 @@ public class ImporterCli {
 
             logger.info("Extracting Features");
             //should be called by itself after importer rather than inside importer.
-            //FeatureBuilder builder = new FeatureBuilder(db);
-            //builder.buildAllSentenceFeatures();
+            FeatureBuilder builder = new FeatureBuilder(db);
+            builder.buildAllSentenceFeatures();
             File modelSavePath = new File("data/model/model.json");
             List<SentenceFeature> dataset = db.getAllSentenceFeatures();
             LogisticRegressionEOS model = new LogisticRegressionEOS(0.1, 2_500, 0.05);

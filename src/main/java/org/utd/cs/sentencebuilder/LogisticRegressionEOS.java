@@ -1,3 +1,19 @@
+/**
+ * LogisticRegressionEOS.java
+ * CS4485 - Fall 2025 - Sentence Builder Project
+ *
+ * Author: Vincent Phan
+ * Date: November 15, 2025
+ *
+ * Description: Implements a Logistic Regression classifier
+ * specifically tuned for End-Of-Sentence (EOS) detection.
+ *
+ * This class serves as the decision-maker of the predictor. It takes
+ * three distinct features (log-odds derived from statistical probabilities)
+ * and learns optimal weights (w1, w2, w3) and a bias (b) to combine them
+ * into a final probability.
+ */
+
 package org.utd.cs.sentencebuilder;
 
 import java.io.*;

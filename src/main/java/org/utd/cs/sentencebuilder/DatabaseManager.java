@@ -775,8 +775,10 @@ public class DatabaseManager {
         Map<Integer, Map<Integer, Map<Integer, WordTriplet>>> nestedTripletMap = new HashMap<>();
 
         // Assumed table/column names based on WordTriplet POJO
-        String sql = "SELECT sequence_id, first_word_id, second_word_id, third_word_id, tri_occurrence_count, tri_end_frequency FROM trigrams";
-
+        String sql = """
+                SELECT sequence_id, first_word_id, second_word_id, third_word_id,
+                tri_occurrence_count, tri_end_frequency FROM trigram_sequence
+                """;
         try (Connection conn = getConnect();
              PreparedStatement pstmt = conn.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {

@@ -1,9 +1,21 @@
-package org.utd.cs.sentencebuilder;
+/**
+ * FeatureBuilder.java
+ * CS4485 - Fall 2025 - Sentence Builder Project
+ *
+ * Author: Vincent Phan
+ * Date: November 6, 2025
+ *
+ * Description: Feature extraction and training data generation
+ *
+ * This class takes raw text and iterates through the sentence corpus
+ * to construct the labeled dataset (X, Y) required for training the
+ * Logistic Regression classifier
+ */
 
+package org.utd.cs.sentencebuilder;
 
 import java.sql.*;
 import java.util.*;
-import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -1,3 +1,38 @@
+/**
+ * EosPredictor.java
+ * CS4485 - Fall 2025 - Sentence Builder Project
+ *
+ * Author: Vincent Phan
+ * Date: November 15, 2025
+ *
+ * Description: Implements the final prediction logic for the End-of-Sentence (EOS)
+ * detector.
+ *
+ *
+ * This class coordinates several components to produce a single,
+ * calibrated probability (0.0 to 1.0) that a given input sentence
+ * is complete.
+ *
+ * The prediction pipeline is as follows:
+ * 1.  The input sentence is tokenized.
+ * 2.  The last three tokens (words) are extracted.
+ * 3.  The `ProbabilityEstimator` is used to calculate three
+ * separate probabilities (features):
+ * a) P(EOS | Context): Probability of EOS given the last 3 words.
+ * b) P(EOS | Word): Probability of EOS given just the last word.
+ * c) P(EOS | Length): Probability of EOS given the current
+ * sentence length (in tokens).
+ * 4.  These three probabilities are converted to log-odds (logit)
+ * to be used as input features for the logistic regression model.
+ * 5.  The pre-trained `LogisticRegressionEOS` model evaluates these
+ * three features to produce the final, combined probability.
+ *
+ * This class ties together the probability model from
+ * `ProbabilityEstimator` with the machine learning model
+ * `LogisticRegressionEOS` to make a final decision.
+ */
+
+
 package org.utd.cs.sentencebuilder;
 
 import org.slf4j.Logger;

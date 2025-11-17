@@ -1,3 +1,19 @@
+/**
+ * ProbabilityEstimator.java
+ * CS4485 - Fall 2025 - Sentence Builder Project
+ *
+ * Author: Vincent Phan
+ * Date: November 6, 2025
+ *
+ * Description: Implements a hierarchical N-gram probability model to estimate
+ * End-of-Sentence (EOS) likelihoods.
+ *
+ * This class models the probability distribution of sentence endings based on
+ * historical text data.
+ * All calculations apply Laplace smoothing to regularize counts and prevent
+ * zero-probability errors for unseen data.
+ */
+
 package org.utd.cs.sentencebuilder;
 
 import java.sql.SQLException;
@@ -11,6 +27,7 @@ public class ProbabilityEstimator {
     private final Map<Integer, Map<Integer, WordPair>> bigramMap;
     private final Map<Integer, Double> lengthProbs;
 
+    private final double globalEosPrior;
     private final double P_EOS_UNKNOWN_UNIGRAM;
     private final double P_EOS_UNKNOWN_LENGTH;
 
@@ -23,9 +40,26 @@ public class ProbabilityEstimator {
         this.trigramMap = trigramMap;
         this.lengthProbs = lengthProbs;
 
-        // A smarter version could calculate the average P(EOS) from the maps
-        this.P_EOS_UNKNOWN_UNIGRAM = 0.5;
-        this.P_EOS_UNKNOWN_LENGTH = 0.5;
+        // 1. Calculate totals by iterating over the cache
+        long totalWords = 0;
+        long totalSentences = 0;
+
+        for (Word w : wordCache.values()) {
+            totalWords += w.getTotalOccurrences();
+            totalSentences += w.getEndSequenceCount();
+        }
+
+        // 2. Calculate the baseline probability
+        if (totalWords > 0) {
+            this.globalEosPrior = (double) totalSentences / (double) totalWords;
+        } else {
+            // Assume 1 in 20 words ends a sentence which is pretty safe.
+            this.globalEosPrior = 0.05;
+        }
+
+        // 3. Set the fallbacks using this calculated prior
+        this.P_EOS_UNKNOWN_UNIGRAM = this.globalEosPrior;
+        this.P_EOS_UNKNOWN_LENGTH = 0.01;
     }
 
 

@@ -2,7 +2,7 @@
  * Tokenizer.java
  * CS4485 - Fall 2025 - Sentence Builder Project
  *
- * Author: Kevin Tran & Vincent Phan
+ * Author: Vincent Phan & Kevin Tran
  * Date: October 3 2025
  *
  * Description:
