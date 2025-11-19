@@ -4,44 +4,61 @@
  *  November 14 2025
  *
  *  Description:
- *  Simple factory for selecting a SentenceGenerator implementation
- *  based on a string key (e.g., "greedy", "weighted").
+ *  Factory class responsible for constructing the correct sentence
+ *  generation strategy based on the requested algorithm name.
  *
- *  This lets the rest of the code (CLI, JavaFX UI, tests) choose
- *  different generation strategies without hard-coding class names.
+ *  Supported algorithms:
+ *    - "bi-greedy"   → BigramGreedyGenerator
+ *    - "bi-weighted" → BigramWeightedGenerator
+ *    - "tri-greedy"   → TrigramGreedyGenerator
+ *    - "tri-weighted" → TrigramWeightedGenerator
  *
- *  Currently supported:
- *    - "greedy"   -> BigramGreedyGenerator
- *    - "weighted" -> BigramWeightedGenerator
- *
- *  Any unknown or null algo name will default to the greedy generator.
+ *  This allows the UI, CLI, and any other component to request a generator
+ *  without needing to understand how each class is constructed.
  */
 
 package org.utd.cs.sentencebuilder;
 
+import java.util.List;
+import java.util.Map;
+
 public class GeneratorFactory {
 
-    private GeneratorFactory() {
-        // utility class; no instances
-    }
-
     public static SentenceGenerator create(String algo, GeneratorDataController data) {
-        String mode = (algo == null ? "greedy" : algo.toLowerCase());
 
-        switch (mode) {
-            case "weighted":
+        Map<String, Integer> w2i = data.getWordToId();
+        Map<Integer, String> i2w = data.getIdToWord();
+
+        switch (algo) {
+            case "bi_weighted":
                 return new BigramWeightedGenerator(
-                        data.getWordToId(),
-                        data.getIdToWord(),
-                        data.getFollowers(),
+                        w2i,
+                        i2w,
+                        data.getBigramFollowers(),
                         data.getStartCandidates()
                 );
-            case "greedy":
-            default:
+            case "bi_greedy":
                 return new BigramGreedyGenerator(
-                        data.getWordToId(),
-                        data.getIdToWord(),
-                        data.getFollowers(),
+                        w2i,
+                        i2w,
+                        data.getBigramFollowers(),
+                        data.getStartCandidates()
+                );
+
+            case "tri_weighted":
+                return new TrigramWeightedGenerator(
+                        w2i,
+                        i2w,
+                        data.getTrigramFollowers(),
+                        data.getStartCandidates()
+                );
+
+            case "tri_greedy":
+            default:
+                return new TrigramGreedyGenerator(
+                        w2i,
+                        i2w,
+                        data.getTrigramFollowers(),
                         data.getStartCandidates()
                 );
         }

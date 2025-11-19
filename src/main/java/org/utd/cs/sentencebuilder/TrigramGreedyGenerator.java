@@ -19,210 +19,150 @@
  */
 
 
- package org.utd.cs.sentencebuilder;
+package org.utd.cs.sentencebuilder;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
- * Greedy trigram generator:
- * - loadData(): caches words and bigram followers in memory
- * - generateSentence(): picks a likely start word, then always chooses the most frequent follower
- * - generateSentence(List<String>): starts from your provided word(s) if present, same greedy step
+ * Greedy trigram generator.
+ * Uses 2-word context (w1, w2) -> most frequent follower w3.
  */
 public class TrigramGreedyGenerator implements SentenceGenerator {
 
-    // Tunables
     private static final int DEFAULT_MAX_TOKENS = 20;
 
-    // In-memory caches after loadData()
-    private final Map<String, Integer> wordToId = new HashMap<>();
-    private final Map<Integer, String> idToWord = new HashMap<>();
+    private final Map<String, Integer> wordToId;
+    private final Map<Integer, String> idToWord;
+    // (w1,w2) encoded as long -> list of (w3, count), sorted desc by count
+    private final Map<Long, List<int[]>> followers;
+    // word_id, start_count (shared with bigrams)
 
-    // Bigram -> Trigram (word1_id, word2_id) -> sorted list of (following_id, count) DESC
-    private final Map<Long, List<int[]>> followers = new HashMap<>();
+    /** Given a first word id, pick a good second id so (w1,w2) is a valid trigram context. */
+    private Integer pickGreedySecondGivenFirst(int firstId) {
+        int bestSecond = -1;
+        int bestTotal  = -1;
 
-    // Precomputed start candidates (id -> start_sentence_count); used to choose a start when not provided
-    private final List<int[]> startCandidates = new ArrayList<>();
+        for (Map.Entry<Long, List<int[]>> e : followers.entrySet()) {
+            long key = e.getKey();
+            int w1 = (int) (key >> 32);
+            if (w1 != firstId) continue;
 
-    private boolean loaded = false;
+            int w2 = (int) key;
+
+            // total number of trigram occurrences for this (w1,w2) pair
+            int total = 0;
+            for (int[] arr : e.getValue()) {
+                total += arr[1];
+            }
+
+            if (total > bestTotal) {
+                bestTotal  = total;
+                bestSecond = w2;
+            }
+        }
+
+        return (bestSecond == -1) ? null : bestSecond;
+    }
+
+
+    public TrigramGreedyGenerator(Map<String, Integer> wordToId,
+                                  Map<Integer, String> idToWord,
+                                  Map<Long, List<int[]>> trigramFollowers,
+                                  List<int[]> startCandidates) {
+        this.wordToId        = wordToId;
+        this.idToWord        = idToWord;
+        this.followers       = trigramFollowers;
+    }
 
     @Override
     public String getName() {
         return "TrigramGreedyGenerator";
     }
 
-    @Override
-    public void loadData() {
-        try (Connection c = getConnection()) {
-            // 1) Load words (ids, strings, starts)
-            try (PreparedStatement ps = c.prepareStatement(
-                    "SELECT word_id, word_value, start_sentence_count, total_occurrences " +
-                    "FROM words")) {
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        int id = rs.getInt("word_id");
-                        String val = rs.getString("word_value");
-                        int start = rs.getInt("start_sentence_count");
-                        // int total = rs.getInt("total_occurrences"); // available if you want backoff/unigram
-                        wordToId.put(val, id);
-                        idToWord.put(id, val);
-                        if (start > 0) startCandidates.add(new int[]{id, start});
-                    }
-                }
-            }
-
-            // sort start candidates by start_sentence_count desc, then by total_occurrences if desired
-            startCandidates.sort((a,b) -> Integer.compare(b[1], a[1]));
-
-            // Bigram -> Trigram 2) Load trigram followers from word_triplets table
-            try (PreparedStatement ps = c.prepareStatement(
-                    "SELECT word1_id, word2_id, word3_id, occurrence_count " +
-                    "FROM word_triplets")) {
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        int word1 = rs.getInt("word1_id");
-                        int word2 = rs.getInt("word2_id");
-                        int word3 = rs.getInt("word3_id");                        
-                        int cnt  = rs.getInt("occurrence_count");
-
-                        // Create composite key from two word IDs
-                        long pairkey = makePairKey(word1, word2);
-
-                        followers.computeIfAbsent(pairkey, k -> new ArrayList<>())
-                                 .add(new int[]{word3, cnt});
-                    }
-                }
-            }
-
-            // sort each follower list by count desc (greedy = top first)
-            for (var e : followers.entrySet()) {
-                e.getValue().sort((x, y) -> Integer.compare(y[1], x[1]));
-            }
-
-            loaded = true;
-        } catch (SQLException e) {
-            e.printStackTrace();
-            loaded = false;
-        }
-    }
 
     @Override
     public String generateSentence() {
         return generateSentence(DEFAULT_MAX_TOKENS, null);
     }
 
-    // previous signature with starting words; keeps behavior
     @Override
     public String generateSentence(List<String> startingWords) {
         return generateSentence(startingWords, DEFAULT_MAX_TOKENS, null);
     }
 
-    // control length & optional stop word (case-insensitive)
+    // no-seed path: pick 2 likely start words
     public String generateSentence(int maxTokens, String stopWord) {
-        ensureLoaded();
-
-        // Bigram -> Trigram, need TWO starting words
-        List<Integer> startIds = pickStartIds(2);
+        List<Integer> startIds = pickStartFromTrigramFollowers();
         if (startIds.size() < 2) return "";
-
         return buildGreedySentence(startIds, maxTokens, stopWord);
     }
 
-   // starting prompt + options
-    public String generateSentence(List<String> startingWords, int maxTokens, String stopWord) {
-        ensureLoaded();
+    // with seed
+        public String generateSentence(List<String> startingWords,
+                                   int maxTokens,
+                                   String stopWord) {
 
-        // Trigram, ensuring word1 and word2 are used to start
-        List<Integer> startIds = new ArrayList<>();
+        // If no seed provided, just pick any trigram start
+        if (startingWords == null || startingWords.isEmpty()) {
+            List<Integer> fromTri = pickStartFromTrigramFollowers();
+            if (fromTri.size() < 2) return "";
+            return buildGreedySentence(fromTri, maxTokens, stopWord);
+        }
 
-        if (startingWords != null) {
-            for (String w : startingWords) {
-                if (w == null || w.isBlank()) continue;
-                Integer id = wordToId.get(w.toLowerCase(Locale.ROOT));
-                if (id != null) {
-                    startIds.add(id);
-                    if (startIds.size() >=2) break;
-                }
+        // Resolve the first seed word
+        Integer firstId = null;
+        Integer secondId = null;
+
+        if (startingWords.get(0) != null && !startingWords.get(0).isBlank()) {
+            firstId = wordToId.get(startingWords.get(0).toLowerCase(Locale.ROOT));
+        }
+
+        // Optional second seed word if user supplied it
+        if (startingWords.size() > 1 &&
+            startingWords.get(1) != null &&
+            !startingWords.get(1).isBlank()) {
+
+            Integer maybeSecond = wordToId.get(startingWords.get(1).toLowerCase(Locale.ROOT));
+            if (firstId != null && maybeSecond != null &&
+                followers.containsKey(makePairKey(firstId, maybeSecond))) {
+                secondId = maybeSecond;
             }
         }
-        
-        // If there is no 2 starting words, fill with most common starts
-        while (startIds.size() < 2) {
-            Integer nextId = pickStartId(startIds.size());
-            if (nextId == null) return "";
-            startIds.add(nextId);
+
+        // If we only have firstId (or (first,second) is invalid), pick a good secondId
+        if (firstId != null && secondId == null) {
+            secondId = pickGreedySecondGivenFirst(firstId);
         }
 
-        /*  Bigram 
-        Integer startId = null;
-        if (startingWords != null) {
-            for (String w : startingWords) {
-                if (w == null || w.isBlank()) continue;
-                Integer id = wordToId.get(w.toLowerCase(Locale.ROOT));
-                if (id != null) { startId = id; break; }
-            }
+        // If we couldn't honor the seed at all, fall back to trigram-based start
+        List<Integer> startIds;
+        if (firstId == null || secondId == null) {
+            startIds = pickStartFromTrigramFollowers();
+        } else {
+            startIds = List.of(firstId, secondId);
         }
-        if (startId == null) startId = pickStartId();
-        if (startId == null) return "";
-        
 
-        return buildGreedySentence(List.of(startId), maxTokens, stopWord);
-        */
-
+        if (startIds.size() < 2) return "";
         return buildGreedySentence(startIds, maxTokens, stopWord);
- 
     }
+
+
+
+    /** Pick a starting (w1, w2) pair that definitely exists in trigramFollowers. */
+    private List<Integer> pickStartFromTrigramFollowers() {
+        if (followers.isEmpty()) {
+            return List.of();
+        }
+
+        // simplest: just grab the first key; you can randomize later if you want
+        long key = followers.keySet().iterator().next();
+        int w1 = (int) (key >> 32);
+        int w2 = (int) key;
+        return List.of(w1, w2);
+    }
+
+
     // ---------- internals ----------
-
-    private void ensureLoaded() { if (!loaded) loadData(); }
-
-    // Bigram -> Trigram 
-    private Integer pickStartId(int index) {
-        if (index < startCandidates.size()) {
-            return startCandidates.get(index)[0];
-        }
-        if (!idToWord.isEmpty()) {
-            // Fallback to any word
-            return idToWord.keySet().iterator().next();
-        }
-        return null;
-    }
-
-    
-     // Bigram -> Trigram, Pick multiple start word IDs
-    private List<Integer> pickStartIds(int count) {
-        List<Integer> ids = new ArrayList<>();
-        for (int i = 0; i < count && i < startCandidates.size(); i++) {
-            ids.add(startCandidates.get(i)[0]);
-        }
-        // If we don't have enough start candidates, add any words
-        if (ids.size() < count) {
-            Iterator<Integer> iter = idToWord.keySet().iterator();
-            while (ids.size() < count && iter.hasNext()) {
-                Integer next = iter.next();
-                if (!ids.contains(next)) {
-                    ids.add(next);
-                }
-            }
-        }
-        return ids;
-    }
-
-
-     // Build a sentence using trigram greedy algorithm
-     // Requires at least 2 starting word IDs
-
     private String buildGreedySentence(List<Integer> seed, int maxTokens, String stopWordRaw) {
         if (seed.size() < 2) return "";
 
@@ -231,53 +171,43 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
         List<Integer> ids = new ArrayList<>(seed);
         Set<Integer> visited = new HashSet<>(ids);  // simple loop guard
 
-        // Bigrams -> Trigrams since we are tracking last 2 words
         int secondLast = ids.get(ids.size() - 2);
-        int last = ids.get(ids.size() - 2);
-        
+        int last       = ids.get(ids.size() - 1);
+
         Set<String> usedTrigrams = new HashSet<>();
 
-        // main loop
-        // Bigram -> Trigram 
         while (ids.size() < Math.max(2, maxTokens)) {
             long pairKey = makePairKey(secondLast, last);
             List<int[]> cands = followers.get(pairKey);
-            
+
             if (cands == null || cands.isEmpty()) {
-                // no trigram found, fall back to bigram here
                 break;
             }
+
             int nextId = -1;
             for (int[] cand : cands) {
                 int candId = cand[0];
 
-                // Bigram -> trigram, create signature for duplicate detection
                 String trigramSig = secondLast + "-" + last + "-" + candId;
                 if (usedTrigrams.contains(trigramSig)) continue;
-                
-                // Prevent immediate self-loops (word -> word)
-                if (candId == last) continue;
-                
-                // Prevent three-word loops (A B A pattern)
-                if (candId == secondLast) continue;
+
+                if (candId == last) continue;        // avoid x y y
+                if (candId == secondLast) continue;  // avoid x y x
 
                 nextId = candId;
                 usedTrigrams.add(trigramSig);
-                break;                
+                break;
             }
 
-            // if all candidates were filtered out, stop
             if (nextId == -1) break;
 
             ids.add(nextId);
             visited.add(nextId);
 
-            // Bigram -> Trigram, Shift the window
+            // slide the window
             secondLast = last;
-            last = nextId;
-            
+            last       = nextId;
 
-            // user stop word (match after mapping id->word)
             if (stopWord != null) {
                 String w = idToWord.getOrDefault(last, "").toLowerCase(Locale.ROOT);
                 if (w.equals(stopWord)) break;
@@ -287,13 +217,10 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
         return render(ids);
     }
 
-    // Bigram -> Trigram, Encoding two word IDs into a single long for use as map key
 
-    private long makePairKey(int word1Id, int word2Id) {
-        return (((long) word1Id) << 32) | (word2Id & 0xffffffffL);
+    private static long makePairKey(int w1, int w2) {
+        return (((long) w1) << 32) | (w2 & 0xffffffffL);
     }
-
-
 
     private String render(List<Integer> ids) {
         StringBuilder sb = new StringBuilder();
@@ -307,10 +234,5 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
 
     public String generateSentenceWithStop(String stopWord) {
         return generateSentence(DEFAULT_MAX_TOKENS, stopWord);
-    }
-
-    // NOTE: requires DatabaseManager to expose a public getConnection()
-    private Connection getConnection() throws SQLException {
-        return new DatabaseManager().getConnection();
     }
 }

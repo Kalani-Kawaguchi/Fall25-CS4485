@@ -4,22 +4,24 @@
  *  November 14 2025
  *
  *  Description:
- *  Implements a weighted random bigram-based sentence generation algorithm.
+ *  Implements weighted-random bigram sentence generation. Instead of
+ *  choosing the most frequent follower, selects followers proportionally
+ *  to their observed frequency counts.
  *
- *  - Loads all words and bigrams from the database (via DatabaseManager)
- *  - Chooses a random start word weighted by start_sentence_count
- *  - For each word, selects the next word based on weighted probability (occurrence_count)
- *  - Stops after max token limit or when no valid follower exists
+ *  Features:
+ *    - Weighted random start-word selection
+ *    - Weighted random next-token selection
+ *    - Optional seed, stop word, and max token limit
+ *    - Shares cached data via GeneratorDataController
+ *
+ *  This model produces diverse outputs and avoids deterministic behavior
+ *  while still respecting statistical frequencies from the corpus.
  */
 
 package org.utd.cs.sentencebuilder;
 
 import java.util.*;
 
-/**
- * Weighted-random bigram generator:
- * - picks next word with probability proportional to occurrence_count
- */
 public class BigramWeightedGenerator implements SentenceGenerator {
 
     private static final int DEFAULT_MAX_TOKENS = 20;

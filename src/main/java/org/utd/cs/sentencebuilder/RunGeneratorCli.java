@@ -12,8 +12,10 @@
  *    - Prints a single generated sentence and some basic stats
  *
  *  Supported flags:
- *    --algo=greedy        Use greedy bigram generator (default)
- *    --algo=weighted      Use weighted-random bigram generator
+ *    --algo=bi-greedy     Use greedy bigram generator
+ *    --algo=bi-weighted   Use weighted-random bigram generator
+ *    --algo=tri-greedy    Use greedy trigram generator (default)
+ *    --algo=tri-weighted  Use weighted-random trigram generator
  *    --seed=word          Optional starting word (e.g., "the")
  *    --max=N              Maximum number of tokens (default: 20)
  *    --stop=word          Optional stop word; generation stops once this appears
@@ -66,6 +68,8 @@ public class RunGeneratorCli {
         try {
             DatabaseManager db = new DatabaseManager();
             GeneratorDataController data = new GeneratorDataController(db);
+
+
 
             SentenceGenerator gen = GeneratorFactory.create(algo, data);
             System.out.println("Using algorithm: " + gen.getName());
