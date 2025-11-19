@@ -47,7 +47,6 @@ import java.util.List;
 
 public class RunGeneratorCli {
     public static void main(String[] args) {
-
         int max = 20;
         String stop = null;
         List<String> seed = List.of();

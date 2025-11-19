@@ -24,48 +24,30 @@ import java.sql.SQLException;
 import java.util.*;
 
 public class GeneratorDataController {
+    private DatabaseManager db;
 
-    private final Map<String, Integer> wordToId       = new HashMap<>();
-    private final Map<Integer, String> idToWord       = new HashMap<>();
+    private Map<String, Integer> wordToId       = new HashMap<>();
+    private Map<Integer, String> idToWord       = new HashMap<>();
     // Bigram followers: prev_id -> list of (next_id, count)
-    private final Map<Integer, List<int[]>> bigramFollowers = new HashMap<>();
+    private  Map<Integer, List<int[]>> bigramFollowers = new HashMap<>();
     // Trigram followers: (w1,w2) encoded in a long -> list of (w3_id, count)
-    private final Map<Long, List<int[]>> trigramFollowers   = new HashMap<>();
+    private  Map<Long, List<int[]>> trigramFollowers   = new HashMap<>();
     // Candidate sentence starts: (word_id, start_sentence_count)
     private final List<int[]> startCandidates          = new ArrayList<>();
 
     public GeneratorDataController(DatabaseManager db) throws SQLException {
-        try (Connection c = db.getConnection()) {
-            loadWords(c);
-            loadBigrams(c);
-            loadTrigrams(c);
-        }
+        this.db = db;
+        this.load();
+        //startSequence
     }
 
-    private void loadWords(Connection c) throws SQLException {
-        String sql =
-            "SELECT word_id, word_value, start_sentence_count " +
-            "FROM words";
-
-        try (PreparedStatement ps = c.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-
-            while (rs.next()) {
-                int id    = rs.getInt("word_id");
-                String val   = rs.getString("word_value");
-                int start = rs.getInt("start_sentence_count");
-
-                wordToId.put(val, id);
-                idToWord.put(id, val);
-                if (start > 0) {
-                    startCandidates.add(new int[]{ id, start });
-                }
-            }
-        }
-
-        // sort by start_sentence_count desc
-        startCandidates.sort((a, b) -> Integer.compare(b[1], a[1]));
+    private void load() throws SQLException {
+        wordToId = db.getWordIds();
+        idToWord = db.getALlWordsAsString();
+        bigramFollowers = db.getBigramMap();
+        trigramFollowers = db.getTrigramMap();
     }
+
 
     /** Load bigram counts from word_pairs (prev -> next). */
     private void loadBigrams(Connection c) throws SQLException {
