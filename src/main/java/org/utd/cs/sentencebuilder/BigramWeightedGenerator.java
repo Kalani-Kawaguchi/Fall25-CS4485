@@ -85,6 +85,25 @@ public class BigramWeightedGenerator implements SentenceGenerator {
         return buildSentence(List.of(startId), maxTokens, stopWord);
     }
 
+    /**
+     * ID-based entry point for the weighted bigram generator.
+     */
+    public String generateFromIds(List<Integer> startingIds,
+                                  int maxTokens,
+                                  String stopWord) {
+        Integer startId = null;
+
+        if (startingIds != null && !startingIds.isEmpty()) {
+            startId = startingIds.get(0);
+        }
+        if (startId == null) {
+            startId = pickWeightedStartId();
+        }
+        if (startId == null) return "";
+
+        return buildSentence(List.of(startId), maxTokens, stopWord);
+    }
+
     // ---------- internals ----------
 
     private Integer pickWeightedStartId() {

@@ -17,9 +17,6 @@
 
 package org.utd.cs.sentencebuilder;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
 
@@ -42,69 +39,80 @@ public class GeneratorDataController {
     }
 
     private void load() throws SQLException {
-        wordToId = db.getWordIds();
-        idToWord = db.getALlWordsAsString();
-        bigramFollowers = db.getBigramMap();
-        trigramFollowers = db.getTrigramMap();
+        // 1) word -> id map (normalized to lowercase for lookups)
+        Map<String, Integer> rawWordIds = db.getWordIds();
+        wordToId.clear();
+        for (Map.Entry<String, Integer> e : rawWordIds.entrySet()) {
+            String lower = e.getKey().toLowerCase(Locale.ROOT);
+            wordToId.put(lower, e.getValue());
+        }
+
+        // 2) id -> word dictionary
+        idToWord.clear();
+        idToWord.putAll(db.getALlWordsAsString());
+
+        // 3) bigram / trigram followers
+        bigramFollowers.clear();
+        bigramFollowers.putAll(db.getBigramMap());
+
+        trigramFollowers.clear();
+        trigramFollowers.putAll(db.getTrigramMap());
+
+        // 4) build startCandidates from full Word objects
+        startCandidates.clear();
+        Map<Integer, Word> allWords = db.getAllWords();
+        for (Word w : allWords.values()) {
+            int start = w.getStartSentenceCount();
+            if (start > 0) {
+                startCandidates.add(new int[]{ w.getWordId(), start });
+            }
+        }
+        // sort by start_sentence_count desc
+        startCandidates.sort((a, b) -> Integer.compare(b[1], a[1]));
     }
+     
+    
+    /**
+     * Resolve a list of seed words into word IDs, up to neededCount.
+     * - Matches case-insensitively using wordToId.
+     * - If we don't get enough IDs from the seeds, we top up with
+     *   the most common start-of-sentence words.
+     */
+    public List<Integer> resolveSeedWords(List<String> startingWords, int neededCount) {
+        List<Integer> ids = new ArrayList<>();
 
-
-    /** Load bigram counts from word_pairs (prev -> next). */
-    private void loadBigrams(Connection c) throws SQLException {
-        String sql =
-            "SELECT preceding_word_id, following_word_id, occurrence_count " +
-            "FROM word_pairs";
-
-        try (PreparedStatement ps = c.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-
-            while (rs.next()) {
-                int prev  = rs.getInt("preceding_word_id");
-                int next  = rs.getInt("following_word_id");
-                int count = rs.getInt("occurrence_count");
-
-                bigramFollowers
-                    .computeIfAbsent(prev, k -> new ArrayList<>())
-                    .add(new int[]{ next, count });
+        if (startingWords != null) {
+            for (String w : startingWords) {
+                if (w == null || w.isBlank()) continue;
+                Integer id = wordToId.get(w.toLowerCase(Locale.ROOT));
+                if (id != null && !ids.contains(id)) {
+                    ids.add(id);
+                    if (ids.size() >= neededCount) break;
+                }
             }
         }
 
-        // sort each follower list by count desc for greedy
-        for (List<int[]> list : bigramFollowers.values()) {
-            list.sort((x, y) -> Integer.compare(y[1], x[1]));
+        // Top up with common start words if necessary
+        int idx = 0;
+        while (ids.size() < neededCount && idx < startCandidates.size()) {
+            int candidateId = startCandidates.get(idx)[0];
+            if (!ids.contains(candidateId)) {
+                ids.add(candidateId);
+            }
+            idx++;
         }
-    }
 
-    /** Load trigram counts from trigram table: (w1, w2) -> w3. */
-    private void loadTrigrams(Connection c) throws SQLException {
-        String sql =
-            "SELECT first_word_id, second_word_id, third_word_id, follows_count " +
-            "FROM trigram_sequence";
-
-        try (PreparedStatement ps = c.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-
-            while (rs.next()) {
-                int w1    = rs.getInt("first_word_id");
-                int w2    = rs.getInt("second_word_id");
-                int w3    = rs.getInt("third_word_id");
-                int count = rs.getInt("follows_count");
-
-                long key = makePairKey(w1, w2);
-                trigramFollowers
-                    .computeIfAbsent(key, k -> new ArrayList<>())
-                    .add(new int[]{ w3, count });
+        // Final fallback: grab any remaining word IDs if still short
+        if (ids.size() < neededCount && !idToWord.isEmpty()) {
+            for (Integer id : idToWord.keySet()) {
+                if (!ids.contains(id)) {
+                    ids.add(id);
+                    if (ids.size() >= neededCount) break;
+                }
             }
         }
 
-        // sort each trigram follower list by count desc (for greedy)
-        for (List<int[]> list : trigramFollowers.values()) {
-            list.sort((a, b) -> Integer.compare(b[1], a[1]));
-        }
-    }
-
-    private static long makePairKey(int w1, int w2) {
-        return (((long) w1) << 32) | (w2 & 0xffffffffL);
+        return ids;
     }
 
     // --- getters used by generators / factory ---

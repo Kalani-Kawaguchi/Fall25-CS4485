@@ -2,20 +2,17 @@
  *  Author: Kevin Tran
  *  Modified for Trigrams: Renz Padlan
  *  CS4485. Fall 2025
- *  November 2025
+ *  November 19 2025
  *  
- * Description:
- *  Implements a greedy Trigram-based sentence generation algorithm based of
- *  the previous greedy Bigram-based sentence generation algorithm that now
- *  loads word and bigram frequency data from the MySQL database.
+ *  Description:
+ *  Greedy trigram sentence generator.
  *
- *  - Loads word and trigram frequency data from the MySQL database
- *  - Selects the most frequent following word greedily
- *  - Supports stop words and maximum token limits
- *  - Prevents short self-loops while allowing natural word reuse
+ *  Uses two-word context:
+ *      (w1, w2) → most frequent follower w3
+ *  Data sourced from trigram_sequence table and shared through
+ *  GeneratorDataController.
  *
- *  Used for testing sentence generation in the RunGeneratorCli class.
- * 
+ *  Supports optional starting word(s) and maximum token limits.
  */
 
 
@@ -35,7 +32,6 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
     private final Map<Integer, String> idToWord;
     // (w1,w2) encoded as long -> list of (w3, count), sorted desc by count
     private final Map<Long, List<int[]>> followers;
-    // word_id, start_count (shared with bigrams)
 
     /** Given a first word id, pick a good second id so (w1,w2) is a valid trigram context. */
     private Integer pickGreedySecondGivenFirst(int firstId) {
@@ -49,7 +45,6 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
 
             int w2 = (int) key;
 
-            // total number of trigram occurrences for this (w1,w2) pair
             int total = 0;
             for (int[] arr : e.getValue()) {
                 total += arr[1];
@@ -63,7 +58,6 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
 
         return (bestSecond == -1) ? null : bestSecond;
     }
-
 
     public TrigramGreedyGenerator(Map<String, Integer> wordToId,
                                   Map<Integer, String> idToWord,
@@ -79,7 +73,6 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
         return "TrigramGreedyGenerator";
     }
 
-
     @Override
     public String generateSentence() {
         return generateSentence(DEFAULT_MAX_TOKENS, null);
@@ -91,14 +84,16 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
     }
 
     // no-seed path: pick 2 likely start words
+    @Override
     public String generateSentence(int maxTokens, String stopWord) {
         List<Integer> startIds = pickStartFromTrigramFollowers();
         if (startIds.size() < 2) return "";
         return buildGreedySentence(startIds, maxTokens, stopWord);
     }
 
-    // with seed
-        public String generateSentence(List<String> startingWords,
+    // with seed (string-based, for interface)
+    @Override
+    public String generateSentence(List<String> startingWords,
                                    int maxTokens,
                                    String stopWord) {
 
@@ -109,7 +104,6 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
             return buildGreedySentence(fromTri, maxTokens, stopWord);
         }
 
-        // Resolve the first seed word
         Integer firstId = null;
         Integer secondId = null;
 
@@ -117,7 +111,6 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
             firstId = wordToId.get(startingWords.get(0).toLowerCase(Locale.ROOT));
         }
 
-        // Optional second seed word if user supplied it
         if (startingWords.size() > 1 &&
             startingWords.get(1) != null &&
             !startingWords.get(1).isBlank()) {
@@ -129,12 +122,10 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
             }
         }
 
-        // If we only have firstId (or (first,second) is invalid), pick a good secondId
         if (firstId != null && secondId == null) {
             secondId = pickGreedySecondGivenFirst(firstId);
         }
 
-        // If we couldn't honor the seed at all, fall back to trigram-based start
         List<Integer> startIds;
         if (firstId == null || secondId == null) {
             startIds = pickStartFromTrigramFollowers();
@@ -146,7 +137,47 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
         return buildGreedySentence(startIds, maxTokens, stopWord);
     }
 
+    /**
+     * ID-based entry point used by controller/CLI.
+     * startingIds: first element is w1, second (optional) is w2.
+     * If we only get w1, we pick a good w2 via pickGreedySecondGivenFirst.
+     */
+    public String generateFromIds(List<Integer> startingIds,
+                                  int maxTokens,
+                                  String stopWord) {
 
+        Integer firstId  = null;
+        Integer secondId = null;
+
+        if (startingIds != null && !startingIds.isEmpty()) {
+            firstId = startingIds.get(0);
+            if (startingIds.size() > 1) {
+                secondId = startingIds.get(1);
+            }
+        }
+
+        if (firstId != null && secondId != null) {
+            long key = makePairKey(firstId, secondId);
+            if (!followers.containsKey(key)) {
+                // invalid (w1,w2) pair, treat as if we only had w1
+                secondId = null;
+            }
+        }
+
+        if (firstId != null && secondId == null) {
+            secondId = pickGreedySecondGivenFirst(firstId);
+        }
+
+        List<Integer> startIds;
+        if (firstId == null || secondId == null) {
+            startIds = pickStartFromTrigramFollowers();
+        } else {
+            startIds = List.of(firstId, secondId);
+        }
+
+        if (startIds.size() < 2) return "";
+        return buildGreedySentence(startIds, maxTokens, stopWord);
+    }
 
     /** Pick a starting (w1, w2) pair that definitely exists in trigramFollowers. */
     private List<Integer> pickStartFromTrigramFollowers() {
@@ -154,15 +185,14 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
             return List.of();
         }
 
-        // simplest: just grab the first key; you can randomize later if you want
         long key = followers.keySet().iterator().next();
         int w1 = (int) (key >> 32);
         int w2 = (int) key;
         return List.of(w1, w2);
     }
 
-
     // ---------- internals ----------
+
     private String buildGreedySentence(List<Integer> seed, int maxTokens, String stopWordRaw) {
         if (seed.size() < 2) return "";
 
@@ -217,7 +247,6 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
         return render(ids);
     }
 
-
     private static long makePairKey(int w1, int w2) {
         return (((long) w1) << 32) | (w2 & 0xffffffffL);
     }
@@ -236,3 +265,4 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
         return generateSentence(DEFAULT_MAX_TOKENS, stopWord);
     }
 }
+

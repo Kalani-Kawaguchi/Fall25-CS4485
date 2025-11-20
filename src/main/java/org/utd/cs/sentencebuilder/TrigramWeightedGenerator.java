@@ -2,17 +2,16 @@
  *  Author: Kevin Tran
  *  Modified for Trigrams: Renz Padlan
  *  CS4485. Fall 2025
- *  November 2025
+ *  November 19 2025
  *
  *  Description:
- *  Implements a weighted random trigram-based sentence generation algorithm based of 
- *  the previous weighted random bigram algorithm
+ *  Weighted-random trigram generator.
  *
- *  - Now Loads all words and trigrams from the database (via DatabaseManager)
- *  - Chooses a random start word weighted by start_sentence_count
- *  - For each TWO-word sequence, selects the next word based on weighted probability (occurrence_count)
- *  - Stops after max token limit or when no valid follower exists
- *  - Provides better context and more varied output than bigram weighted model
+ *  Chooses next words using weighted randomness over:
+ *      (w1, w2) → list of (w3, count)
+ *  This provides more variation than greedy trigram generation.
+ *
+ *  All data comes from GeneratorDataController (no DB queries here).
  */
 
 package org.utd.cs.sentencebuilder;
@@ -39,7 +38,6 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
 
     /** Weighted choice of secondId given firstId, based on total trigram counts. */
     private Integer pickWeightedSecondGivenFirst(int firstId) {
-        // secondId -> total count over all followers
         Map<Integer, Integer> secondTotals = new HashMap<>();
 
         for (Map.Entry<Long, List<int[]>> e : followers.entrySet()) {
@@ -65,24 +63,20 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
             cumulative += e.getValue();
             if (roll < cumulative) return e.getKey();
         }
-        // Fallback
         return secondTotals.keySet().iterator().next();
     }
 
-    
     /** Pick a start pair (w1, w2) from trigramFollowers. Currently uniform over keys. */
     private List<Integer> pickStartFromTrigramFollowers() {
         if (followers.isEmpty()) {
             return List.of();
         }
 
-
         long key = followers.keySet().iterator().next();
         int w1 = (int) (key >> 32);
         int w2 = (int) key;
         return List.of(w1, w2);
     }
-
 
     @Override
     public String getName() {
@@ -99,11 +93,20 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
         return generateSentence(startingWords, DEFAULT_MAX_TOKENS, null);
     }
 
+    @Override
+    public String generateSentence(int maxTokens, String stopWord) {
+        // No-seed path: just pick any trigram start (same as string path)
+        List<Integer> fromTri = pickStartFromTrigramFollowers();
+        if (fromTri.size() < 2) return "";
+        return buildSentence(fromTri, maxTokens, stopWord);
+    }
+
+    // string-based (interface) API
+    @Override
     public String generateSentence(List<String> startingWords,
                                    int maxTokens,
                                    String stopWord) {
 
-        // No seed -> pure trigram start
         if (startingWords == null || startingWords.isEmpty()) {
             List<Integer> fromTri = pickStartFromTrigramFollowers();
             if (fromTri.size() < 2) return "";
@@ -117,7 +120,6 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
             firstId = wordToId.get(startingWords.get(0).toLowerCase(Locale.ROOT));
         }
 
-        // Optional second seed word
         if (startingWords.size() > 1 &&
             startingWords.get(1) != null &&
             !startingWords.get(1).isBlank()) {
@@ -129,7 +131,6 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
             }
         }
 
-        // If we only have firstId, pick secondId using weighted frequencies
         if (firstId != null && secondId == null) {
             secondId = pickWeightedSecondGivenFirst(firstId);
         }
@@ -145,19 +146,56 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
         return buildSentence(startIds, maxTokens, stopWord);
     }
 
+    /**
+     * ID-based entry point used by controller/CLI.
+     */
+    public String generateFromIds(List<Integer> startingIds,
+                                  int maxTokens,
+                                  String stopWord) {
+
+        Integer firstId  = null;
+        Integer secondId = null;
+
+        if (startingIds != null && !startingIds.isEmpty()) {
+            firstId = startingIds.get(0);
+            if (startingIds.size() > 1) {
+                secondId = startingIds.get(1);
+            }
+        }
+
+        if (firstId != null && secondId != null) {
+            long key = makePairKey(firstId, secondId);
+            if (!followers.containsKey(key)) {
+                secondId = null;
+            }
+        }
+
+        if (firstId != null && secondId == null) {
+            secondId = pickWeightedSecondGivenFirst(firstId);
+        }
+
+        List<Integer> startIds;
+        if (firstId == null || secondId == null) {
+            startIds = pickStartFromTrigramFollowers();
+        } else {
+            startIds = List.of(firstId, secondId);
+        }
+
+        if (startIds.size() < 2) return "";
+        return buildSentence(startIds, maxTokens, stopWord);
+    }
 
     // ---------- internals ----------
+
     private String buildSentence(List<Integer> seed,
-                             int maxTokens,
-                             String stopWordRaw) {
+                                 int maxTokens,
+                                 String stopWordRaw) {
         if (seed.size() < 2) return "";
 
         final String stopWord =
                 (stopWordRaw == null ? null : stopWordRaw.toLowerCase(Locale.ROOT));
 
         List<Integer> ids = new ArrayList<>(seed);
-
-        // track used trigrams instead of every word
         Set<String> usedTrigrams = new HashSet<>();
 
         int secondLast = ids.get(ids.size() - 2);
@@ -167,19 +205,14 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
             long key = makePairKey(secondLast, last);
             List<int[]> cands = followers.get(key);
             if (cands == null || cands.isEmpty()) {
-                // no trigram continuation for this pair
                 break;
             }
 
             int nextId = -1;
-
-            // try candidates in weighted fashion, but skip bad ones
-            // (we'll just roll repeatedly until we find an acceptable one or give up)
             int attempts = 0;
             while (attempts < 10 && nextId == -1) {
                 int candId = chooseWeightedNext(cands);
 
-                // avoid trivial loops: x y y or x y x
                 if (candId == last) {
                     attempts++;
                     continue;
@@ -199,12 +232,10 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
                 nextId = candId;
             }
 
-            // if everything was filtered out, stop
             if (nextId == -1) break;
 
             ids.add(nextId);
 
-            // slide window
             secondLast = last;
             last       = nextId;
 
@@ -216,7 +247,6 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
 
         return render(ids);
     }
-
 
     private int chooseWeightedNext(List<int[]> cands) {
         int total = 0;

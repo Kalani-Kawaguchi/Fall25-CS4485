@@ -3,16 +3,20 @@
  *  CS4485. Fall 2025
  *  October 18 2025
  *  
- * Description:
- *  Implements a greedy bigram-based sentence generation algorithm that
- *  loads word and bigram frequency data from the MySQL database.
+ *  Description:
+ *  Implements a greedy bigram sentence generator. At each step, selects
+ *  the most frequent follower word unless prevented by loop-avoidance rules.
  *
- *  - Loads word and bigram frequency data from the MySQL database
- *  - Selects the most frequent following word greedily
- *  - Supports stop words and maximum token limits
- *  - Prevents short self-loops while allowing natural word reuse
+ *  Uses shared cached data from GeneratorDataController:
+ *    - Word/ID mappings
+ *    - Bigram follower lists
+ *    - Sentence-start candidates
  *
- *  Used for testing sentence generation in the RunGeneratorCli class.
+ *  Supports:
+ *    - Optional seed words
+ *    - Optional stop word
+ *    - Maximum token limits
+ *    - Loop prevention (no A→B→A, no repeated bigrams)
  */
 
 
@@ -80,6 +84,27 @@ public class BigramGreedyGenerator implements SentenceGenerator {
         }
         if (startId == null) startId = pickStartId();
         if (startId == null) return "";
+        return buildGreedySentence(List.of(startId), maxTokens, stopWord);
+    }
+
+    /**
+     * ID-based entry point used by the controller/CLI.
+     * startingIds: first element (if present) is used as the start;
+     *              otherwise we fall back to pickStartId().
+     */
+    public String generateFromIds(List<Integer> startingIds,
+                                  int maxTokens,
+                                  String stopWord) {
+        Integer startId = null;
+
+        if (startingIds != null && !startingIds.isEmpty()) {
+            startId = startingIds.get(0);
+        }
+        if (startId == null) {
+            startId = pickStartId();
+        }
+        if (startId == null) return "";
+
         return buildGreedySentence(List.of(startId), maxTokens, stopWord);
     }
 

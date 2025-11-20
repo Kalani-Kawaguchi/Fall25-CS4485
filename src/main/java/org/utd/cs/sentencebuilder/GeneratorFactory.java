@@ -19,7 +19,6 @@
 
 package org.utd.cs.sentencebuilder;
 
-import java.util.List;
 import java.util.Map;
 
 public class GeneratorFactory {
