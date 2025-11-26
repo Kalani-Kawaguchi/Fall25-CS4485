@@ -64,11 +64,11 @@ public class DatabaseManager {
         }
     }
 
-    private Connection getConnect() throws SQLException {
+    public Connection getConnect() throws SQLException {
         return dataSource.getConnection();
     }
 
-
+    // Public-facing connection getter for external classes (e.g., sentence generators)
     public Connection getConnection() throws SQLException {
         return getConnect();
     }
@@ -506,7 +506,6 @@ public class DatabaseManager {
              PreparedStatement pstmt = conn.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) { // No parameters to set
 
-            // Iterate over the result set and populate the map
             while (rs.next()) {
                 wordIdMap.put(rs.getString("word_value"), rs.getInt("word_id"));
             }
@@ -601,6 +600,27 @@ public class DatabaseManager {
             throw e;
         }
 
+        logger.info("Successfully retrieved {} words.", wordMap.size());
+        return wordMap;
+    }
+
+    public Map<Integer, String> getALlWordsAsString() throws SQLException {
+        logger.info("Retrieving all words as strings from the database to build dictionary.");
+        Map<Integer, String> wordMap = new HashMap<>();
+        String sql = """
+                SELECT word_id, word_value FROM words
+                """;
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+            while (rs.next()) {
+                wordMap.put(rs.getInt("word_id"), rs.getString("word_value"));
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to retrieve all words.", e);
+            throw e;
+        }
         logger.info("Successfully retrieved {} words.", wordMap.size());
         return wordMap;
     }
@@ -724,6 +744,40 @@ public class DatabaseManager {
 
         logger.info("Successfully retrieved and mapped {} preceding word IDs.", nestedPairMap.size());
         return nestedPairMap;
+    }
+
+    public Map<Integer, List<int[]>> getBigramMap() throws SQLException {
+        logger.info("Retrieving bigram mapping.");
+        String sql = """
+                SELECT preceding_word_id, following_word_id, occurrence_count
+                FROM word_pairs
+                """;
+
+        Map<Integer, List<int[]>> bigramMap = new HashMap<>();
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                int prev  = rs.getInt("preceding_word_id");
+                int next  = rs.getInt("following_word_id");
+                int count = rs.getInt("occurrence_count");
+
+                bigramMap
+                        .computeIfAbsent(prev, k -> new ArrayList<>())
+                        .add(new int[]{ next, count });
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to create bigram map.", e);
+            throw e;
+        }
+
+        for (List<int[]> list : bigramMap.values()) {
+            list.sort((x, y) -> Integer.compare(y[1], x[1]));
+        }
+        logger.info("Successfully retrieved {} bigrams.", bigramMap.size());
+        return bigramMap;
     }
 
     /**
@@ -1050,6 +1104,44 @@ public class DatabaseManager {
 
         logger.info("Successfully retrieved {} length/hazard pairs.", lengthMap.size());
         return lengthMap;
+    }
+
+
+    public Map<Long, List<int[]>> getTrigramMap() throws SQLException {
+        logger.info("Retrieving trigram mapping.");
+        String sql = """
+                SELECT first_word_id, second_word_id, third_word_id, follows_count
+                FROM trigram_sequence
+                """;
+
+        Map<Long, List<int[]>> trigramMap = new HashMap<>();
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                int w1    = rs.getInt("first_word_id");
+                int w2    = rs.getInt("second_word_id");
+                int w3    = rs.getInt("third_word_id");
+                int count = rs.getInt("follows_count");
+
+                long key = (((long) w1) << 32) | (w2 & 0xffffffffL);
+
+                trigramMap
+                        .computeIfAbsent(key, k -> new ArrayList<>())
+                        .add(new int[]{ w3, count });
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to create bigram map.", e);
+            throw e;
+        }
+
+        for (List<int[]> list : trigramMap.values()) {
+            list.sort((x, y) -> Integer.compare(y[1], x[1]));
+        }
+        logger.info("Successfully retrieved {} trigram.", trigramMap.size());
+        return trigramMap;
     }
 
 
