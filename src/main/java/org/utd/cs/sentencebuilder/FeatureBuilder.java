@@ -27,9 +27,14 @@ public class FeatureBuilder {
 
     private final DatabaseManager db;
     private final ProbabilityEstimator probEstimator;
-    private Map<Integer, Word> idToWord = new HashMap<>();
-    private Map<Integer, Map<Integer, Map<Integer, WordTriplet>>> idToTrigram = new HashMap<>();
-    private Map<Integer, Map<Integer, WordPair>> idToBigram = new HashMap<>();
+
+    // Primitive maps for the ProbabilityEstimator
+    // [0] = total occurrences, [1] = end sequence count
+    private final Map<Integer, int[]> unigramStats = new HashMap<>();
+    // Key: (w1 << 32 | w2) -> Value: [total, endCount]
+    private final Map<Long, int[]> bigramStats = new HashMap<>();
+    // Key: (w1 << 32 | w2) -> Value: Map<w3, [total, endCount]>
+    private final Map<Long, Map<Integer, int[]>> trigramStats = new HashMap<>();
     private Map<String, Integer> wordToId = new HashMap<>();
     private Map<Integer, Double> lengthHistogram = new HashMap<>();
     private List<SentenceFeature> featureBatch = new ArrayList<>();
@@ -37,17 +42,60 @@ public class FeatureBuilder {
     public FeatureBuilder(DatabaseManager db) throws SQLException {
         this.db = db;
         loadWordMappings();
-        this.probEstimator = new ProbabilityEstimator(idToWord, idToBigram, idToTrigram, lengthHistogram);
+
+        logger.info("Structuring complete. Forcing GC to clear raw object maps...");
+        System.gc();
+
+        this.probEstimator = new ProbabilityEstimator(unigramStats, bigramStats, trigramStats, lengthHistogram);
     }
 
     public void loadWordMappings() throws SQLException {
         logger.info("Loading word-to-ID mappings...");
-        idToWord = db.getAllWords();
-        idToBigram = db.getAllWordPairs();
-        idToTrigram = db.getAllWordTriplets();
         wordToId = db.getWordIds();
         lengthHistogram = db.getLengthProbabilityMap();
-        logger.info("Loaded {} words into cache.", wordToId.size());
+        Map<Integer, Word> rawWords = db.getAllWords();
+        Map<Integer, Map<Integer, WordPair>> rawBigrams = db.getAllWordPairs();
+        Map<Integer, Map<Integer, Map<Integer, WordTriplet>>> rawTrigrams = db.getAllWordTriplets();
+
+        // 2. Flatten Unigrams: Word -> int[]
+        unigramStats.clear();
+        for (Word w : rawWords.values()) {
+            unigramStats.put(w.getWordId(), new int[]{ w.getTotalOccurrences(), w.getEndSequenceCount() });
+        }
+
+        // 3. Flatten Bigrams: Map<w1, Map<w2, WP>> -> Map<Long, int[]>
+        bigramStats.clear();
+        for (Map.Entry<Integer, Map<Integer, WordPair>> outer : rawBigrams.entrySet()) {
+            int w1 = outer.getKey();
+            for (Map.Entry<Integer, WordPair> inner : outer.getValue().entrySet()) {
+                int w2 = inner.getKey();
+                WordPair wp = inner.getValue();
+
+                long key = pack(w1, w2);
+                bigramStats.put(key, new int[]{ wp.getOccurrenceCount(), wp.getEndFrequency() });
+            }
+        }
+
+        trigramStats.clear();
+        for (Map.Entry<Integer, Map<Integer, Map<Integer, WordTriplet>>> level1 : rawTrigrams.entrySet()) {
+            int w1 = level1.getKey();
+            for (Map.Entry<Integer, Map<Integer, WordTriplet>> level2 : level1.getValue().entrySet()) {
+                int w2 = level2.getKey();
+                long key = pack(w1, w2);
+
+                trigramStats.putIfAbsent(key, new HashMap<>());
+                Map<Integer, int[]> innerStats = trigramStats.get(key);
+
+                for (Map.Entry<Integer, WordTriplet> level3 : level2.getValue().entrySet()) {
+                    int w3 = level3.getKey();
+                    WordTriplet wt = level3.getValue();
+                    innerStats.put(w3, new int[]{ wt.getOccurrenceCount(), wt.getEndFrequency() });
+                }
+            }
+        }
+
+        logger.info("Loaded {} unigrams, {} bigrams, and {} trigram contexts.",
+                unigramStats.size(), bigramStats.size(), trigramStats.size());
     }
 
 
@@ -151,6 +199,10 @@ public class FeatureBuilder {
             featureBatch.clear();
         }
         logger.info("Feature generation complete.");
+    }
+
+    private long pack(int w1, int w2) {
+        return ((long) w1 << 32) | (w2 & 0xFFFFFFFFL);
     }
 
 }

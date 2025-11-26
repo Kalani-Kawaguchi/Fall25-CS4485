@@ -47,48 +47,34 @@ public class EosPredictor {
 
     private final LogisticRegressionEOS model;
     private final ProbabilityEstimator probEstimator;
-    private final Map<String, Integer> wordToId;
 
 
     public EosPredictor(LogisticRegressionEOS model,
-                        ProbabilityEstimator probEstimator,
-                        Map<String, Integer> wordToId) {
+                        ProbabilityEstimator probEstimator) {
         this.model = model;
         this.probEstimator = probEstimator;
-        this.wordToId = wordToId;
     }
 
-    public double predictEosProbability(String sentenceText) {
-        if (sentenceText == null || sentenceText.isBlank()) {
+    /**
+     * Calculates the probability that the current sequence of tokens ends a sentence.
+     * * @param currentSentenceIds The growing list of token IDs generated so far.
+     * @return double Probability (0.0 - 1.0)
+     */
+    public double predictEosProbability(List<Integer> currentSentenceIds) {
+        if (currentSentenceIds == null || currentSentenceIds.isEmpty()) {
             return 0.0;
         }
 
-        List<String> tokens = Tokenizer.tokenizeSentence(sentenceText);
-        if (tokens.isEmpty()) {
-            return 0.0;
-        }
+        int len = currentSentenceIds.size();
 
-        int len = tokens.size();
+        Integer w3 = currentSentenceIds.get(len - 1); // The last word (candidate for end)
+        Integer w2 = (len > 1) ? currentSentenceIds.get(len - 2) : null;
+        Integer w1 = (len > 2) ? currentSentenceIds.get(len - 3) : null;
 
-        String t3_str = tokens.get(len - 1);
-        String t2_str = (len > 1) ? tokens.get(len - 2) : null;
-        String t1_str = (len > 2) ? tokens.get(len - 3) : null;
-
-        Integer w3 = wordToId.get(t3_str);
-        Integer w2 = (t2_str != null) ? wordToId.get(t2_str) : null;
-        Integer w1 = (t1_str != null) ? wordToId.get(t1_str) : null;
-
-        if (w3 == null) {
-            // Last word is Out-of-Vocabulary.
-            logger.warn("Last word '{}' is OOV. Returning 0.5.", t3_str);
-            //fallback
-            return 0.5;
-        }
-
-        // 1. Calculate the 3 probabilities (x1, x2, x3)
+        // 1. Calculate the 3 probabilities (x1, x2, x3) using the Estimator
         double pEosContext = probEstimator.pEosGivenContext(w1, w2, w3);
-        double pEosWord = probEstimator.pEosGivenWord(w3);
-        double pEosLength = probEstimator.pEosGivenLength(len);
+        double pEosWord    = probEstimator.pEosGivenWord(w3);
+        double pEosLength  = probEstimator.pEosGivenLength(len);
 
         // 2. Convert to log-odds (logit)
         double x1 = safeLogit(pEosContext);
@@ -96,7 +82,11 @@ public class EosPredictor {
         double x3 = safeLogit(pEosLength);
 
         // 3. Evaluate using the logistic regression model
-        return model.eval(x1, x2, x3);
+        double probability = model.eval(x1, x2, x3);
+
+        logger.debug("EOS Pred: len={} [{},{},{}] -> prob={}", len, w1, w2, w3, probability);
+
+        return probability;
     }
 
     /**

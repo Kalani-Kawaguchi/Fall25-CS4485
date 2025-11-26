@@ -22,31 +22,39 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class ProbabilityEstimator {
-    private final Map<Integer, Word> wordCache;
-    private final Map<Integer, Map<Integer, Map<Integer, WordTriplet>>> trigramMap;
-    private final Map<Integer, Map<Integer, WordPair>> bigramMap;
+    //private final Map<Integer, Word> wordCache;
+    //private final Map<Integer, Map<Integer, Map<Integer, WordTriplet>>> trigramMap;
+    //private final Map<Integer, Map<Integer, WordPair>> bigramMap;
     private final Map<Integer, Double> lengthProbs;
+
+    // [0] = total occurrences, [1] = end sequence count
+    private final Map<Integer, int[]> unigramStats;
+    // Key: (w1 << 32 | w2) -> Value: [total, endCount]
+    private final Map<Long, int[]> bigramStats;
+    // Key: (w1 << 32 | w2) -> Value: Map<w3, [total, endCount]>
+    // We nest the third word because 3 ints don't fit in one long.
+    private final Map<Long, Map<Integer, int[]>> trigramStats;
 
     private final double globalEosPrior;
     private final double P_EOS_UNKNOWN_UNIGRAM;
     private final double P_EOS_UNKNOWN_LENGTH;
 
-    public ProbabilityEstimator(Map<Integer, Word> wordCache,
-                                Map<Integer, Map<Integer, WordPair>> bigramMap,
-                                Map<Integer, Map<Integer, Map<Integer, WordTriplet>>> trigramMap,
+    public ProbabilityEstimator(Map<Integer, int[]> unigramStats,
+                                Map<Long, int[]> bigramStats,
+                                Map<Long, Map<Integer, int[]>> trigramStats,
                                 Map<Integer, Double> lengthProbs) {
-        this.wordCache = wordCache;
-        this.bigramMap = bigramMap;
-        this.trigramMap = trigramMap;
+        this.unigramStats = unigramStats;
+        this.bigramStats = bigramStats;
+        this.trigramStats = trigramStats;
         this.lengthProbs = lengthProbs;
 
         // 1. Calculate totals by iterating over the cache
         long totalWords = 0;
         long totalSentences = 0;
 
-        for (Word w : wordCache.values()) {
-            totalWords += w.getTotalOccurrences();
-            totalSentences += w.getEndSequenceCount();
+        for (int[] stats : unigramStats.values()) {
+            totalWords += stats[0];
+            totalSentences += stats[1];
         }
 
         // 2. Calculate the baseline probability
@@ -64,49 +72,48 @@ public class ProbabilityEstimator {
 
 
     public double pEosGivenWord(int id) {
-        Word w = wordCache.get(id);
-        if (w == null) return P_EOS_UNKNOWN_UNIGRAM;
-        return (w.getEndSequenceCount() + 1.0) / (w.getTotalOccurrences() + 2.0);
+        int[] stats = unigramStats.get(id);
+        if (stats == null) return P_EOS_UNKNOWN_UNIGRAM;
+        return (stats[1] + 1.0) / (stats[0] + 2.0);
     }
 
     public double pEosGivenContext(Integer w1, Integer w2, Integer w3) {
-
-        // 1. Try Trigram
+        // 1. Try Trigram: Context is w1, w2 -> looking for w3 stats
         if (w1 != null && w2 != null && w3 != null) {
-            Map<Integer, Map<Integer, WordTriplet>> midMap = trigramMap.get(w1);
-            if (midMap != null) {
-                Map<Integer, WordTriplet> innerMap = midMap.get(w2);
-                if (innerMap != null) {
-                    WordTriplet triplet = innerMap.get(w3);
-                    if (triplet != null) {
-                        // Found triplet, calculate probability
-                        return (triplet.getEndFrequency() + 1.0) / (triplet.getOccurrenceCount() + 2.0);
-                    }
-                }
-            }
-        }
-
-        // 2. Try Bigram (Backoff)
-        if (w2 != null && w3 != null) {
-            Map<Integer, WordPair> innerMap = bigramMap.get(w2);
+            long key = pack(w1, w2);
+            Map<Integer, int[]> innerMap = trigramStats.get(key);
             if (innerMap != null) {
-                WordPair pair = innerMap.get(w3);
-                if (pair != null) {
-                    // Found bigram, calculate probability
-                    return (pair.getEndFrequency() + 1.0) / (pair.getOccurrenceCount() + 2.0);
+                int[] stats = innerMap.get(w3);
+                if (stats != null) {
+                    return (stats[1] + 1.0) / (stats[0] + 2.0);
                 }
             }
         }
 
-        // 3. Try Unigram (Backoff)
+        // 2. Try Bigram: Context is w2 -> looking for w3 stats
+        // Note: For EOS check, the "bigram" is the pair (w2, w3)
+        if (w2 != null && w3 != null) {
+            long key = pack(w2, w3);
+            int[] stats = bigramStats.get(key);
+            if (stats != null) {
+                return (stats[1] + 1.0) / (stats[0] + 2.0);
+            }
+        }
+
+        // 3. Try Unigram
         if (w3 != null) {
             return this.pEosGivenWord(w3);
         }
 
-        return P_EOS_UNKNOWN_UNIGRAM; // Final fallback
+        return P_EOS_UNKNOWN_UNIGRAM;
     }
 
     public double pEosGivenLength(int length) {
         return lengthProbs.getOrDefault(length, P_EOS_UNKNOWN_LENGTH);
     }
+
+    private long pack(int w1, int w2) {
+        return ((long) w1 << 32) | (w2 & 0xFFFFFFFFL);
+    }
+
 }
