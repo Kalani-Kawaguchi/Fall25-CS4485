@@ -212,7 +212,8 @@ public class ImporterCli {
 
                 System.gc(); // optional force garbage collect
             }
-
+            // remove any serious outliers (run-on sentences)
+            db.pruneOutliers(.99);
             db.recomputeLengthHazards();
             logger.info("Import complete");
 

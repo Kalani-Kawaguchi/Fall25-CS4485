@@ -24,6 +24,10 @@ import org.slf4j.LoggerFactory;
 public class FeatureBuilder {
     private static final Logger logger = LoggerFactory.getLogger(FeatureBuilder.class);
     private static final int BATCH_SIZE = 100000;
+    // some victorian text have unreasonably long run-on sentences that are poisoning our data.
+    private static final int MAX_REAL_TRAINING_LENGTH = 60;
+    private static final int SYNTHETIC_BUFFER = 200;
+    private static final int SAMPLES_PER_LENGTH_STEP = 200;
 
     private final DatabaseManager db;
     private final ProbabilityEstimator probEstimator;
@@ -110,6 +114,11 @@ public class FeatureBuilder {
         try {
             List<String> tokens = Tokenizer.tokenizeSentence(sentence.getText());
             int len = sentence.getTokenCount();
+
+            if (len > MAX_REAL_TRAINING_LENGTH) {
+                return;
+            }
+
             if (tokens.isEmpty()) return;
 
             for (int i = 0; i < len; i++) {
@@ -162,10 +171,92 @@ public class FeatureBuilder {
             logger.error("Error processing sentence ID {}: {}", sentence.getSentenceId(), e.getMessage(), e);
         }
     }
+    // Features are too collinear, Thus we will augment our feature space
+    // by injecting synthetic feature vectors that decorrelate N-Gram scores from
+    // length scores to force the model to learn the weight for the length feature.
+    public void generateSyntheticFeatures() throws SQLException {
+        logger.info("Injecting synthetic feature-space vectors to fix Length Weight...");
+
+        int startLen = MAX_REAL_TRAINING_LENGTH + 1;
+        int syntheticLimit = startLen + SYNTHETIC_BUFFER;
+
+        logger.info("Detected max real length: {}. Generating synthetic tail up to {}.", startLen, syntheticLimit);
+        Random rng = new Random();
+        int synthIdCounter = -1;
+        // We will generate data points from the end of the corpus up to a high limit
+        for (int L = startLen + 1; L <= syntheticLimit; L++) {
+            double baseProb = syntheticLengthProbability(L, startLen, syntheticLimit);
+            double baseLogit = safeLogit(baseProb);
+
+            for (int k = 0; k < SAMPLES_PER_LENGTH_STEP; k++) {
+                // prevent exact duplicates
+                double jitter = (rng.nextDouble() * 0.1) - 0.05;
+                // Positive EOS
+                SentenceFeature fPos = new SentenceFeature();
+                fPos.setSentenceId(synthIdCounter--);
+                fPos.setTokenIndex(L - 1);
+                fPos.setWord("<SYNTH_POS>");
+                fPos.setContextType("synthetic");
+                fPos.setContextNgram("synth_pos");
+                fPos.setSentenceLen(L);
+                fPos.setpEosLength(baseProb);
+
+                // X1, X2 = 0.0 (Neutral/Unknown)
+                fPos.setX1(0.0);
+                fPos.setX2(0.0);
+                fPos.setX3(baseLogit + jitter);
+
+                fPos.setLabel(1);
+                featureBatch.add(fPos);
+
+                double lowProb = 0.01;
+                double lowLogit = safeLogit(lowProb);
+
+                // Negative EOS
+                SentenceFeature fNeg = new SentenceFeature();
+                fNeg.setSentenceId(synthIdCounter--);
+                fNeg.setTokenIndex(L - 1);
+                fNeg.setWord("<SYNTH_NEG>");
+                fNeg.setContextType("synthetic");
+                fNeg.setContextNgram("synth_neg");
+                fNeg.setSentenceLen(L);
+                fNeg.setpEosLength(lowProb);
+
+                fNeg.setX1(0.0);
+                fNeg.setX2(0.0);
+                fNeg.setX3(lowLogit + jitter); // Low Negative Logit (e.g., -4.5)
+
+                fNeg.setLabel(0);
+                featureBatch.add(fNeg);
+
+                if (featureBatch.size() >= BATCH_SIZE) flushBatch();
+            }
+        }
+
+        flushBatch();
+    }
+
+    /**
+     * Compute synthetic length probability for unseen long sentences.
+     */
+    private double syntheticLengthProbability(int length, int maxCorpusLen, int syntheticLimit) {
+        // We want prob to go from ~0.1 to 0.99 as length goes from maxCorpus to 200
+        double maxProb = 0.99; // Cap at 99%, not 50%
+
+        // Simple linear interpolation
+        double progress = (double)(length - maxCorpusLen) / (syntheticLimit - maxCorpusLen);
+        double prob = 0.1 + (progress * (maxProb - 0.1));
+
+        return Math.min(0.99, Math.max(0.01, prob));
+    }
 
     private void flushBatch() throws SQLException {
         if (featureBatch.isEmpty()) return;
-        db.addSentenceFeaturesInBatch(featureBatch);
+        try {
+            db.addSentenceFeaturesInBatch(featureBatch);
+        } catch (SQLException e) {
+            logger.error("Error flushing batch: {}", e.getMessage(), e);
+        }
         featureBatch.clear();
     }
 
@@ -195,11 +286,15 @@ public class FeatureBuilder {
         // After all sentences are processed, flush any remaining features
         if (!featureBatch.isEmpty()) {
             logger.info("Flushing final batch of {} features.", featureBatch.size());
-            db.addSentenceFeaturesInBatch(featureBatch);
-            featureBatch.clear();
+            flushBatch();
         }
+
+        logger.info("Generating synthetic EOS samples");
+        generateSyntheticFeatures();
+
         logger.info("Feature generation complete.");
     }
+
 
     private long pack(int w1, int w2) {
         return ((long) w1 << 32) | (w2 & 0xFFFFFFFFL);

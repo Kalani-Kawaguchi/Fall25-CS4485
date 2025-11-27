@@ -47,7 +47,7 @@ import java.util.List;
 
 public class RunGeneratorCli {
     public static void main(String[] args) {
-        int max = 20;
+        int max = 1000;
         String stop = null;
         List<String> seed = List.of();
         String algo = "greedy";
@@ -67,8 +67,6 @@ public class RunGeneratorCli {
         try {
             DatabaseManager db = new DatabaseManager();
             GeneratorDataController data = new GeneratorDataController(db);
-
-
 
             SentenceGenerator gen = GeneratorFactory.create(algo, data);
             System.out.println("Using algorithm: " + gen.getName());

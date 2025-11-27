@@ -19,11 +19,25 @@
 
 package org.utd.cs.sentencebuilder;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.Map;
 
 public class GeneratorFactory {
 
-    public static SentenceGenerator create(String algo, GeneratorDataController data) {
+    public static SentenceGenerator create(String algo, GeneratorDataController data) throws IOException {
+        System.out.println(algo);
+        ProbabilityEstimator estimator = new ProbabilityEstimator(
+                data.getUnigramStats(),
+                data.getBigramStats(),
+                data.getTrigramStats(),
+                data.getLengthProbs()
+        );
+        File modelLoadPath = new File("data/model/model.json");
+
+        LogisticRegressionEOS model = LogisticRegressionEOS.loadModel(modelLoadPath);
+        System.out.println(model.getB() + " " + model.getW1() + " " + model.getW2() + " " + model.getW3());
+        EosPredictor predictor = new EosPredictor(model, estimator);
 
         Map<String, Integer> w2i = data.getWordToId();
         Map<Integer, String> i2w = data.getIdToWord();
@@ -44,6 +58,12 @@ public class GeneratorFactory {
                         data.getStartCandidates()
                 );
 
+            case "bi_greedy_eos":
+                return new BigramGreedyUsingEOSPredictor(
+                        data,
+                        predictor
+                );
+
             case "tri_weighted":
                 return new TrigramWeightedGenerator(
                         w2i,
@@ -53,13 +73,15 @@ public class GeneratorFactory {
                 );
 
             case "tri_greedy":
-            default:
                 return new TrigramGreedyGenerator(
                         w2i,
                         i2w,
                         data.getTrigramFollowers(),
                         data.getStartCandidates()
                 );
+
+            default:
+                return null;
         }
     }
 }

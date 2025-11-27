@@ -109,7 +109,7 @@ public class ProbabilityEstimator {
     }
 
     public double pEosGivenLength(int length) {
-        return lengthProbs.getOrDefault(length, P_EOS_UNKNOWN_LENGTH);
+        return lengthProbs.get(length);
     }
 
     private long pack(int w1, int w2) {

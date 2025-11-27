@@ -188,7 +188,9 @@ public class LogisticRegressionEOS {
      * @return predicted probability of EOS
      */
     public double eval(double x1, double x2, double x3) {
+
         double z = b + w1 * x1 + w2 * x2 + w3 * x3;
+        logger.debug("{} + {}*{} + {}*{} + {}*{} = {}", b, w1, x1, w2, x2, w3, x3, z);
         return sigmoid(z);
     }
 

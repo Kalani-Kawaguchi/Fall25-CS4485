@@ -81,6 +81,7 @@ public class EosPredictor {
         double x2 = safeLogit(pEosWord);
         double x3 = safeLogit(pEosLength);
 
+        //logger.info("{} {} {}", x1, x2, x3);
         // 3. Evaluate using the logistic regression model
         double probability = model.eval(x1, x2, x3);
 

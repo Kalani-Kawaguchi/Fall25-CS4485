@@ -132,7 +132,7 @@ public class DatabaseManager {
                 ")";
 
         String createSentenceHistogram = """
-                CREATE TABLE sentence_histogram(
+                CREATE TABLE IF NOT EXISTS sentence_histogram(
                 sentence_length INT NOT NULL PRIMARY KEY,
                 frequency INT NOT NULL DEFAULT 0,
                 tail_count BIGINT DEFAULT 0,
@@ -146,7 +146,7 @@ public class DatabaseManager {
                 "sentence_id INT NOT NULL," +
                 "token_index INT NOT NULL," +
                 "word VARCHAR(255) NOT NULL," +
-                "context_type ENUM('unigram', 'bigram', 'trigram') NOT NULL," +
+                "context_type ENUM('unigram', 'bigram', 'trigram', 'synthetic') NOT NULL," +
                 "context_ngram VARCHAR(512) NOT NULL," +
                 "sentence_len INT NOT NULL," +
                 "p_eos_context DOUBLE," +
@@ -749,7 +749,7 @@ public class DatabaseManager {
     public Map<Integer, List<int[]>> getBigramMap() throws SQLException {
         logger.info("Retrieving bigram mapping.");
         String sql = """
-                SELECT preceding_word_id, following_word_id, occurrence_count
+                SELECT preceding_word_id, following_word_id, bi_occurrence_count
                 FROM word_pairs
                 """;
 
@@ -762,7 +762,7 @@ public class DatabaseManager {
             while (rs.next()) {
                 int prev  = rs.getInt("preceding_word_id");
                 int next  = rs.getInt("following_word_id");
-                int count = rs.getInt("occurrence_count");
+                int count = rs.getInt("bi_occurrence_count");
 
                 bigramMap
                         .computeIfAbsent(prev, k -> new ArrayList<>())
@@ -874,6 +874,43 @@ public class DatabaseManager {
         return nestedTripletMap;
     }
 
+    public Map<Long, List<int[]>> getTrigramMap() throws SQLException {
+        logger.info("Retrieving trigram mapping.");
+        String sql = """
+                SELECT first_word_id, second_word_id, third_word_id, tri_occurrence_count
+                FROM trigram_sequence
+                """;
+
+        Map<Long, List<int[]>> trigramMap = new HashMap<>();
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                int w1    = rs.getInt("first_word_id");
+                int w2    = rs.getInt("second_word_id");
+                int w3    = rs.getInt("third_word_id");
+                int count = rs.getInt("tri_occurrence_count");
+
+                long key = (((long) w1) << 32) | (w2 & 0xffffffffL);
+
+                trigramMap
+                        .computeIfAbsent(key, k -> new ArrayList<>())
+                        .add(new int[]{ w3, count });
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to create bigram map.", e);
+            throw e;
+        }
+
+        for (List<int[]> list : trigramMap.values()) {
+            list.sort((x, y) -> Integer.compare(y[1], x[1]));
+        }
+        logger.info("Successfully retrieved {} trigram.", trigramMap.size());
+        return trigramMap;
+    }
+
     /**
      * Inserts or updates a batch of sentence feature records in the database.
      * Each feature corresponds to a token-level EOS prediction context.
@@ -969,99 +1006,9 @@ public class DatabaseManager {
         return features;
     }
 
-    /**
-     * Retrieves the probability P(EOS | bigram) for a given pair of word IDs.
-     */
-    public double getBigramEndProbability(int w1, int w2) throws SQLException {
-        String sql = """
-        SELECT CASE
-            WHEN bi_occurrence_count > 0
-            THEN CAST(bi_end_frequency AS DOUBLE) / bi_occurrence_count
-            ELSE 0.0
-        END AS prob
-        FROM word_pairs
-        WHERE preceding_word_id = ? AND following_word_id = ?
-        """;
-        try (Connection conn = getConnect();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setInt(1, w1);
-            pstmt.setInt(2, w2);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) return rs.getDouble("prob");
-            }
-        }
-        return 0.0;
-    }
-
-    /**
-     * Retrieves the probability P(EOS | trigram) for a given triplet of word IDs.
-     */
-    public double getTrigramEndProbability(int w1, int w2, int w3) throws SQLException {
-        String sql = """
-        SELECT CASE
-            WHEN tri_occurrence_count > 0
-            THEN CAST(tri_end_frequency AS DOUBLE) / tri_occurrence_count 
-            ELSE 0.0
-        END AS prob
-        FROM trigram_sequence
-        WHERE first_word_id = ? AND second_word_id = ? AND third_word_id = ?
-        """;
-        try (Connection conn = getConnect();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setInt(1, w1);
-            pstmt.setInt(2, w2);
-            pstmt.setInt(3, w3);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) return rs.getDouble("prob");
-            }
-        }
-        return 0.0;
-    }
-
-    public double getEosProbabilityGivenLength(int length) throws SQLException {
-        String sql = """
-        SELECT hazard FROM sentence_histogram
-        WHERE sentence_length = ?
-    """;
-
-        try (Connection conn = getConnect();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, length);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getDouble("hazard");
-                }
-            }
-        }
-
-        // Fallback: get nearest longer length if not present
-        return getNearestEosProbabilityGivenLength(length);
-    }
-
-    public double getNearestEosProbabilityGivenLength(int length) throws SQLException {
-        String sql = """
-        SELECT hazard
-        FROM sentence_histogram
-        WHERE sentence_length > ?
-        ORDER BY sentence_length ASC
-        LIMIT 1
-    """;
-
-        try (Connection conn = getConnect();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, length);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getDouble("hazard");
-                }
-            }
-        }
-
-        // Default fallback if we’re longer than any recorded sentence
-        return 1e-4; // Very low end probability
-    }
-
     public void recomputeLengthHazards() throws SQLException {
+        logger.info("Recomputing hazards.");
+
         String sql = "WITH hist AS (SELECT sentence_length, frequency, " +
                 "SUM(frequency) OVER (ORDER BY sentence_length DESC) AS tail_count " +
                 "FROM sentence_histogram) " +
@@ -1106,42 +1053,91 @@ public class DatabaseManager {
         return lengthMap;
     }
 
+    /**
+     * Prunes statistical outliers from the dataset based on sentence length.
+     * Calculates the 99th percentile length and deletes anything longer from
+     * sentences, histogram, and features.
+     *
+     *
+     * @param percentile The target percentile to keep (e.g., 0.99).
+     * @return The number of sentences removed.
+     * @throws SQLException
+     */
+    public int pruneOutliers(double percentile) throws SQLException {
+        logger.info("Pruning dataset to keep {}% (removing outliers)...", percentile * 100);
 
-    public Map<Long, List<int[]>> getTrigramMap() throws SQLException {
-        logger.info("Retrieving trigram mapping.");
-        String sql = """
-                SELECT first_word_id, second_word_id, third_word_id, follows_count
-                FROM trigram_sequence
-                """;
+        List<Integer> lengths = new ArrayList<>();
+        int cutoffLength = 0;
 
-        Map<Long, List<int[]>> trigramMap = new HashMap<>();
-
+        // 1. Analyze Distribution
         try (Connection conn = getConnect();
-             PreparedStatement pstmt = conn.prepareStatement(sql);
-             ResultSet rs = pstmt.executeQuery()) {
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT token_count FROM sentences")) {
 
             while (rs.next()) {
-                int w1    = rs.getInt("first_word_id");
-                int w2    = rs.getInt("second_word_id");
-                int w3    = rs.getInt("third_word_id");
-                int count = rs.getInt("follows_count");
-
-                long key = (((long) w1) << 32) | (w2 & 0xffffffffL);
-
-                trigramMap
-                        .computeIfAbsent(key, k -> new ArrayList<>())
-                        .add(new int[]{ w3, count });
+                lengths.add(rs.getInt("token_count"));
             }
-        } catch (SQLException e) {
-            logger.error("Failed to create bigram map.", e);
-            throw e;
         }
 
-        for (List<int[]> list : trigramMap.values()) {
-            list.sort((x, y) -> Integer.compare(y[1], x[1]));
+        if (lengths.isEmpty()) {
+            logger.warn("Database is empty. No pruning performed.");
+            return 0;
         }
-        logger.info("Successfully retrieved {} trigram.", trigramMap.size());
-        return trigramMap;
+
+        // 2. Calculate Cutoff
+        Collections.sort(lengths);
+        int index = (int) (lengths.size() * percentile);
+        index = Math.max(0, Math.min(index, lengths.size() - 1));
+        cutoffLength = lengths.get(index);
+
+        // Safety floor to prevent over-pruning on small datasets
+        if (cutoffLength < 5) cutoffLength = 5;
+
+        logger.info("Distribution Analysis: Max Length={}, {} Percentile Cutoff={}",
+                lengths.get(lengths.size() - 1), percentile, cutoffLength);
+
+        // 3. Execute Deletion (Transactional)
+        // We delete from sentences AND histogram to ensure stats are clean.
+        // We also clean features in case this is run late, but we respect synthetic IDs (negative).
+        String delFeatures = "DELETE FROM sentence_features WHERE sentence_len > ? AND sentence_id >= 0";
+        String delSentences = "DELETE FROM sentences WHERE token_count > ?";
+        String delHistogram = "DELETE FROM sentence_histogram WHERE sentence_length > ?";
+
+        try (Connection conn = getConnect()) {
+            conn.setAutoCommit(false); // Start Transaction
+
+            try (PreparedStatement psFeat = conn.prepareStatement(delFeatures);
+                 PreparedStatement psSent = conn.prepareStatement(delSentences);
+                 PreparedStatement psHist = conn.prepareStatement(delHistogram)) {
+
+                // Delete children first (Features)
+                psFeat.setInt(1, cutoffLength);
+                int featCount = psFeat.executeUpdate();
+
+                // Delete parents second (Sentences)
+                psSent.setInt(1, cutoffLength);
+                int sentCount = psSent.executeUpdate();
+
+                // Delete histogram entries for removed lengths
+                // This is crucial: recomputeLengthHazards relies on this table being accurate.
+                psHist.setInt(1, cutoffLength);
+                int histCount = psHist.executeUpdate();
+
+                conn.commit();
+
+                logger.info("PRUNE COMPLETE: Removed {} sentences, {} features, and {} histogram entries > length {}",
+                        sentCount, featCount, histCount, cutoffLength);
+
+                return sentCount;
+
+            } catch (SQLException e) {
+                conn.rollback(); // Rollback on error
+                logger.error("Pruning failed. Rolled back changes.", e);
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        }
     }
 
 
