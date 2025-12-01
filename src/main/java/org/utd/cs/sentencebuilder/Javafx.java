@@ -78,9 +78,7 @@ public class Javafx extends Application {
         stage.show();
     }
 
-    // MAIN SCENE which includes the upload and generation
-    private Scene buildMainScene(Stage stage) {
-        // --- Upload Section ---
+    private static VBox uploadSection(Stage stage) {
         Label uploadTitle = new Label("Upload Text File");
         uploadTitle.setStyle(
                 "-fx-font-family: 'Helvetica'; " +
@@ -93,18 +91,22 @@ public class Javafx extends Application {
         uploadButton.setOnAction(actionEvent -> selectFile(stage));
         uploadButton.setStyle(
                 "-fx-background-color: transparent;" +
-                "-fx-border-color: #cfcfcf;" +
-                "-fx-border-style: dashed;" +
-                "-fx-border-radius: 12;" +
-                "-fx-background-radius: 12;" +
-                "-fx-text-fill: #6b7580;" +
-                "-fx-font-size: 16px;" +
-                "-fx-padding: 50 100 50 100;"
+                        "-fx-border-color: #cfcfcf;" +
+                        "-fx-border-style: dashed;" +
+                        "-fx-border-radius: 12;" +
+                        "-fx-background-radius: 12;" +
+                        "-fx-text-fill: #6b7580;" +
+                        "-fx-font-size: 16px;" +
+                        "-fx-padding: 50 100 50 100;"
         );
 
         VBox uploadBox = new VBox(8, uploadTitle, uploadButton);
         uploadBox.setAlignment(Pos.CENTER);
 
+        return uploadBox;
+    }
+
+    private static HBox inputRow() {
         // -- Starting Word Input ---
         Label startLabel = new Label("Starting Word");
         startLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
@@ -114,10 +116,10 @@ public class Javafx extends Application {
         startInput.setPrefWidth(180);
         startInput.setStyle(
                 "-fx-background-radius: 10;" +
-                "-fx-border-radius: 10;" +
-                "-fx-border-color: #d8dfe3;" +
-                "-fx-padding: 10 12 10 12;" +
-                "-fx-font-size: 13px;"
+                        "-fx-border-radius: 10;" +
+                        "-fx-border-color: #d8dfe3;" +
+                        "-fx-padding: 10 12 10 12;" +
+                        "-fx-font-size: 13px;"
         );
 
         startInput.textProperty().addListener((observableValue, oldValue, newValue) -> {
@@ -139,6 +141,36 @@ public class Javafx extends Application {
                 new VBox(5, algoLabel, algoDropdown)
         );
         inputRow.setAlignment(Pos.CENTER);
+
+        return inputRow;
+    }
+
+    private static VBox outputSection() {
+        Label outputLabel = new Label("Generated Sentence");
+        outputLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
+
+        TextArea outputArea = new TextArea("Your generated sentence will appear here...");
+        outputArea.setEditable(false);
+        outputArea.setWrapText(true);
+        outputArea.setPrefWidth(400);
+        outputArea.setPrefHeight(100);
+        outputArea.setStyle(
+                "-fx-font-style: italic;" +
+                        "-fx-text-fill: #4f5b4f;" +
+                        "-fx-font-size: 13px;" +
+                        "-fx-control-inner-background: #e4eddc;"
+        );
+
+        return new VBox(8, outputLabel, outputArea);
+    }
+
+    // MAIN SCENE which includes the upload and generation
+    private Scene buildMainScene(Stage stage) {
+        // --- Upload Section ---
+        VBox uploadBox = uploadSection(stage);
+
+        // --- Input Row ---
+        HBox inputRow = inputRow();
 
         // ---Generation & History Buttons---
         Button generateButton = new Button("Generate Sentence");
@@ -165,23 +197,10 @@ public class Javafx extends Application {
         );
 
         // ---Sentence Output Section--
-        Label outputLabel = new Label("Generated Sentence");
-        outputLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
-
-        TextArea outputArea = new TextArea("Your generated sentence will appear here...");
-        outputArea.setEditable(false);
-        outputArea.setWrapText(true);
-        outputArea.setPrefWidth(400);
-        outputArea.setPrefHeight(100);
-        outputArea.setStyle(
-                "-fx-font-style: italic;" +
-                "-fx-text-fill: #4f5b4f;" +
-                "-fx-font-size: 13px;" +
-                "-fx-control-inner-background: #e4eddc;"
-        );
+        VBox outputSection = outputSection();
 
         // ---Compose Card Layout---
-        VBox card = new VBox(20, uploadBox, inputRow, generateButton, historyButton, new VBox(8, outputLabel, outputArea));
+        VBox card = new VBox(20, uploadBox, inputRow, generateButton, historyButton, outputSection);
         card.setAlignment(Pos.CENTER);
         card.setStyle(
                 "-fx-background-color: #ffffff;" +
