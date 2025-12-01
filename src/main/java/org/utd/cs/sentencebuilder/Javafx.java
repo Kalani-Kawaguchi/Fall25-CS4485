@@ -53,10 +53,10 @@ public class Javafx extends Application {
     public static void setDatabaseManager(DatabaseManager databaseManager) {
         db = databaseManager;
     }
-    //Temporary, will unify factory and controller later.
-    private static GeneratorDataController dataController; //Vincent Phan
-    public static void setGeneratorDataController(GeneratorDataController controller) {
-        dataController = controller;
+    // Unified Controller
+    private static GeneratorController generatorController;
+    public static void setGeneratorController(GeneratorController controller) {
+        generatorController = controller;
     }
 
     private static final int MAX_WORDS = 1;
@@ -224,13 +224,14 @@ public class Javafx extends Application {
                 "-fx-pref-width: 400;"
         );
 
+        //Vincent Phan
         generateButton.setOnAction(e -> {
             String startingText = startInput.getText().trim();
             String selectedAlgo = algoDropdown.getValue();
 
             // 1. Validation
-            if (dataController == null) {
-                outputArea.setText("Error: Data Controller is not initialized.");
+            if (generatorController == null) {
+                outputArea.setText("Error: Generator Controller is not initialized.");
                 return;
             }
             if (startingText.isEmpty()) {
@@ -242,12 +243,9 @@ public class Javafx extends Application {
             List<String> seed = Arrays.asList(startingText.split("\\s+"));
 
             try {
-                // 3. FACTORY INTEGRATION
-                SentenceGenerator generator = GeneratorFactory.create(selectedAlgo, dataController);
+                String result = generatorController.generate(selectedAlgo, seed);
 
-                // temp values
-                String result = generator.generateSentence(seed, 20, null);
-
+                // 4. Display
                 outputArea.setText(result);
 
             } catch (Exception ex) {
