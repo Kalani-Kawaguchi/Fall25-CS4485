@@ -27,6 +27,8 @@ import javafx.collections.ObservableMap;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.input.Dragboard;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
@@ -87,7 +89,7 @@ public class Javafx extends Application {
                         "-fx-text-fill: #333333;"
         );
 
-        Button uploadButton = new Button("Click to upload a .txt file");
+        Button uploadButton = new Button("Drag & Drop or Click to upload a .txt file");
         uploadButton.setOnAction(actionEvent -> selectFile(stage));
         uploadButton.setStyle(
                 "-fx-background-color: transparent;" +
@@ -97,8 +99,38 @@ public class Javafx extends Application {
                         "-fx-background-radius: 12;" +
                         "-fx-text-fill: #6b7580;" +
                         "-fx-font-size: 16px;" +
-                        "-fx-padding: 50 100 50 100;"
+                        "-fx-padding: 50 100 50 100;" +
+                        "-fx-alignment: CENTER;"
         );
+        uploadButton.setAlignment(Pos.CENTER);
+
+        uploadButton.setOnDragOver(dragEvent -> {
+            if (dragEvent.getGestureSource() != uploadButton && dragEvent.getDragboard().hasFiles()){
+                dragEvent.acceptTransferModes(TransferMode.COPY_OR_MOVE);
+            }
+            dragEvent.consume();
+        });
+
+        uploadButton.setOnDragDropped(dropEvent -> {
+            Dragboard dragboard = dropEvent.getDragboard();
+            boolean success = false;
+            if(dragboard.hasFiles()) {
+                File f = dragboard.getFiles().get(0);
+
+                if (f.getName().toLowerCase().endsWith(".txt")){
+                    importFile(f);
+                }else{
+                    Alert alert = new Alert(Alert.AlertType.WARNING);
+                    alert.setTitle("Invalid File Type");
+                    alert.setContentText("Only .txt files are allowed");
+                    alert.show();
+                }
+
+                success = true;
+            }
+            dropEvent.setDropCompleted(success);
+            dropEvent.consume();
+        });
 
         VBox uploadBox = new VBox(8, uploadTitle, uploadButton);
         uploadBox.setAlignment(Pos.CENTER);
@@ -308,6 +340,23 @@ public class Javafx extends Application {
     }
 
 
+    private static void importFile(File file){
+        Path dest = Path.of("data/clean", file.getName());
+
+        try {
+            Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
+            System.out.println("File saved");
+
+            //Kevin Tran
+            //Uses the shared DatabaseManager instance to import the file
+            boolean wordsOnly = false;
+            new ImporterCli(db).run(Path.of("data/clean"), wordsOnly);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     public static void selectFile(Stage stage){
         fileChooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("Text Files", "*.txt")
@@ -317,20 +366,7 @@ public class Javafx extends Application {
         File file = fileChooser.showOpenDialog(stage);
 
         if (file != null) {
-            Path dest = Path.of("data/clean", file.getName());
-
-            try {
-                Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
-                System.out.println("File saved");
-
-                //Kevin Tran
-                //Uses the shared DatabaseManager instance to import the file
-                boolean wordsOnly = false;
-                new ImporterCli(db).run(Path.of("data/clean"), wordsOnly);
-
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            importFile(file);
         } else {
             System.out.println("No file");
         }
