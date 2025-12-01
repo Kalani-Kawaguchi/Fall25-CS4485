@@ -9,6 +9,7 @@ public class WordPair {
     private int precedingWordId;
     private int followingWordId;
     private int occurrenceCount;
+    private int biEndFrequency;
 
     // Constructors
     public WordPair() {}
@@ -50,6 +51,11 @@ public class WordPair {
     public void setOccurrenceCount(int occurrenceCount) {
         this.occurrenceCount = occurrenceCount;
     }
+
+    public int getEndFrequency() {return biEndFrequency; }
+
+    public void setEndFrequency(int biEndFrequency) {this.biEndFrequency = biEndFrequency; }
+
 
     @Override
     public String toString() {
