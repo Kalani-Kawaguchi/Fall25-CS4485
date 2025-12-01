@@ -49,6 +49,11 @@ public class Javafx extends Application {
     public static void setDatabaseManager(DatabaseManager databaseManager) {
         db = databaseManager;
     }
+    //Temporary, will unify factory and controller later.
+    private static GeneratorDataController dataController; //Vincent Phan
+    public static void setGeneratorDataController(GeneratorDataController controller) {
+        dataController = controller;
+    }
 
     private static final int MAX_WORDS = 1;
     private static final FileChooser fileChooser = new FileChooser();
@@ -120,18 +125,25 @@ public class Javafx extends Application {
                 "-fx-font-size: 13px;"
         );
 
+        /** Unneeded as generator needs lists of strings. -Vincent
         startInput.textProperty().addListener((observableValue, oldValue, newValue) -> {
             String[] words = newValue.trim().split("\\s+");
             if (words.length > MAX_WORDS) startInput.setText(words[0]);
         });
+         **/
 
         // ---Algorithm Dropdown Selection ---
         Label algoLabel = new Label("Algorithm");
         algoLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
 
         ComboBox<String> algoDropdown = new ComboBox<>();
-        algoDropdown.getItems().addAll("Greedy"); // add more if needed
-        algoDropdown.setValue("Greedy");
+        algoDropdown.getItems().addAll(
+                "bi_greedy",
+                "bi_weighted",
+                "tri_greedy",
+                "tri_weighted"
+        );
+        algoDropdown.setValue("bi_greedy");
         algoDropdown.setPrefWidth(180);
 
         HBox inputRow = new HBox(25,
@@ -179,6 +191,36 @@ public class Javafx extends Application {
                 "-fx-font-size: 13px;" +
                 "-fx-control-inner-background: #e4eddc;"
         );
+
+
+        //Vincent Phan
+        generateButton.setOnAction(e -> {
+            String startingText = startInput.getText().trim();
+            String selectedAlgo = algoDropdown.getValue();
+            if (dataController == null) {
+                outputArea.setText("Error: Data Controller is not initialized.");
+                return;
+            }
+            if (startingText.isEmpty()) {
+                outputArea.setText("Please enter a starting word.");
+                return;
+            }
+            java.util.List<String> seed = java.util.Arrays.asList(startingText.split("\\s+"));
+
+            try {
+
+                //Temporary.
+                SentenceGenerator generator = GeneratorFactory.create(selectedAlgo, dataController);
+
+                String result = generator.generateSentence(seed, 20, null);
+
+                outputArea.setText(result);
+            } catch (Exception ex) {
+                ex.printStackTrace();
+                outputArea.setText("Error generating sentence: " + ex.getMessage());
+            }
+
+        });
 
         // ---Compose Card Layout---
         VBox card = new VBox(20, uploadBox, inputRow, generateButton, historyButton, new VBox(8, outputLabel, outputArea));

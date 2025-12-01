@@ -14,9 +14,12 @@ public class Main {
             //hands the shared DatabaseManager instance to Javafx
             Javafx.setDatabaseManager(db);
 
+            GeneratorDataController controller = new GeneratorDataController(db);
+            Javafx.setGeneratorDataController(controller);
+
             Javafx.main(args); //blocks here until JavaFX application exits
 
-            db.clearAllData();
+            //db.clearAllData();
         } catch (SQLException e) {
             System.err.println("❌ Database operation failed: " + e.getMessage());
             e.printStackTrace();
