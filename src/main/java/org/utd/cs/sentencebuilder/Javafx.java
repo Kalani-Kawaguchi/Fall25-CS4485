@@ -43,6 +43,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 
 public class Javafx extends Application {
@@ -61,6 +63,10 @@ public class Javafx extends Application {
     private static final FileChooser fileChooser = new FileChooser();
     private static Scene homeScene;
     private static ObservableMap<String, SourceFile> importedFiles = FXCollections.observableHashMap();
+
+    private static TextField startInput;
+    private static ComboBox<String> algoDropdown;
+    private static TextArea outputArea;
 
     private Scene mainScene;
     private Scene historyScene;
@@ -146,7 +152,7 @@ public class Javafx extends Application {
         Label startLabel = new Label("Starting Word");
         startLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
 
-        TextField startInput = new TextField();
+        startInput = new TextField();
         startInput.setPromptText("Enter a word to begin...");
         startInput.setPrefWidth(180);
         startInput.setStyle(
@@ -157,18 +163,11 @@ public class Javafx extends Application {
                         "-fx-font-size: 13px;"
         );
 
-        /** Unneeded as generator needs lists of strings. -Vincent
-        startInput.textProperty().addListener((observableValue, oldValue, newValue) -> {
-            String[] words = newValue.trim().split("\\s+");
-            if (words.length > MAX_WORDS) startInput.setText(words[0]);
-        });
-         **/
-
         // ---Algorithm Dropdown Selection ---
         Label algoLabel = new Label("Algorithm");
         algoLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
 
-        ComboBox<String> algoDropdown = new ComboBox<>();
+        algoDropdown = new ComboBox<>();
         algoDropdown.getItems().addAll(
                 "bi_greedy",
                 "bi_weighted",
@@ -191,7 +190,7 @@ public class Javafx extends Application {
         Label outputLabel = new Label("Generated Sentence");
         outputLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
 
-        TextArea outputArea = new TextArea("Your generated sentence will appear here...");
+        outputArea = new TextArea("Your generated sentence will appear here...");
         outputArea.setEditable(false);
         outputArea.setWrapText(true);
         outputArea.setPrefWidth(400);
@@ -225,6 +224,38 @@ public class Javafx extends Application {
                 "-fx-pref-width: 400;"
         );
 
+        generateButton.setOnAction(e -> {
+            String startingText = startInput.getText().trim();
+            String selectedAlgo = algoDropdown.getValue();
+
+            // 1. Validation
+            if (dataController == null) {
+                outputArea.setText("Error: Data Controller is not initialized.");
+                return;
+            }
+            if (startingText.isEmpty()) {
+                outputArea.setText("Please enter a starting word.");
+                return;
+            }
+
+            // 2. Prepare Input (List<String>)
+            List<String> seed = Arrays.asList(startingText.split("\\s+"));
+
+            try {
+                // 3. FACTORY INTEGRATION
+                SentenceGenerator generator = GeneratorFactory.create(selectedAlgo, dataController);
+
+                // temp values
+                String result = generator.generateSentence(seed, 20, null);
+
+                outputArea.setText(result);
+
+            } catch (Exception ex) {
+                ex.printStackTrace();
+                outputArea.setText("Error generating sentence: " + ex.getMessage());
+            }
+        });
+
         Button historyButton = new Button("View Upload History");
         historyButton.setOnAction(e -> stage.setScene(historyScene));
         historyButton.setStyle(
@@ -241,35 +272,6 @@ public class Javafx extends Application {
         // ---Sentence Output Section--
         VBox outputSection = outputSection();
 
-
-        //Vincent Phan
-        generateButton.setOnAction(e -> {
-            String startingText = startInput.getText().trim();
-            String selectedAlgo = algoDropdown.getValue();
-            if (dataController == null) {
-                outputArea.setText("Error: Data Controller is not initialized.");
-                return;
-            }
-            if (startingText.isEmpty()) {
-                outputArea.setText("Please enter a starting word.");
-                return;
-            }
-            java.util.List<String> seed = java.util.Arrays.asList(startingText.split("\\s+"));
-
-            try {
-
-                //Temporary.
-                SentenceGenerator generator = GeneratorFactory.create(selectedAlgo, dataController);
-
-                String result = generator.generateSentence(seed, 20, null);
-
-                outputArea.setText(result);
-            } catch (Exception ex) {
-                ex.printStackTrace();
-                outputArea.setText("Error generating sentence: " + ex.getMessage());
-            }
-
-        });
 
         // ---Compose Card Layout---
         VBox card = new VBox(20, uploadBox, inputRow, generateButton, historyButton, outputSection);
