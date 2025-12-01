@@ -27,6 +27,8 @@ import javafx.collections.ObservableMap;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.input.Dragboard;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
@@ -57,9 +59,7 @@ public class Javafx extends Application {
 
     private static final int MAX_WORDS = 1;
     private static final FileChooser fileChooser = new FileChooser();
-    //private static DatabaseManager db = new DatabaseManager();
     private static Scene homeScene;
-    //private static Scene historyScene; // redundant, delete soon
     private static ObservableMap<String, SourceFile> importedFiles = FXCollections.observableHashMap();
 
     private Scene mainScene;
@@ -83,9 +83,7 @@ public class Javafx extends Application {
         stage.show();
     }
 
-    // MAIN SCENE which includes the upload and generation
-    private Scene buildMainScene(Stage stage) {
-        // --- Upload Section ---
+    private static VBox uploadSection(Stage stage) {
         Label uploadTitle = new Label("Upload Text File");
         uploadTitle.setStyle(
                 "-fx-font-family: 'Helvetica'; " +
@@ -94,22 +92,56 @@ public class Javafx extends Application {
                         "-fx-text-fill: #333333;"
         );
 
-        Button uploadButton = new Button("Click to upload a .txt file");
+        Button uploadButton = new Button("Drag & Drop or Click to upload a .txt file");
         uploadButton.setOnAction(actionEvent -> selectFile(stage));
         uploadButton.setStyle(
                 "-fx-background-color: transparent;" +
-                "-fx-border-color: #cfcfcf;" +
-                "-fx-border-style: dashed;" +
-                "-fx-border-radius: 12;" +
-                "-fx-background-radius: 12;" +
-                "-fx-text-fill: #6b7580;" +
-                "-fx-font-size: 16px;" +
-                "-fx-padding: 50 100 50 100;"
+                        "-fx-border-color: #cfcfcf;" +
+                        "-fx-border-style: dashed;" +
+                        "-fx-border-radius: 12;" +
+                        "-fx-background-radius: 12;" +
+                        "-fx-text-fill: #6b7580;" +
+                        "-fx-font-size: 16px;" +
+                        "-fx-padding: 50 100 50 100;" +
+                        "-fx-alignment: CENTER;"
         );
+        uploadButton.setAlignment(Pos.CENTER);
+
+        uploadButton.setOnDragOver(dragEvent -> {
+            if (dragEvent.getGestureSource() != uploadButton && dragEvent.getDragboard().hasFiles()){
+                dragEvent.acceptTransferModes(TransferMode.COPY_OR_MOVE);
+            }
+            dragEvent.consume();
+        });
+
+        uploadButton.setOnDragDropped(dropEvent -> {
+            Dragboard dragboard = dropEvent.getDragboard();
+            boolean success = false;
+            if(dragboard.hasFiles()) {
+                File f = dragboard.getFiles().get(0);
+
+                if (f.getName().toLowerCase().endsWith(".txt")){
+                    importFile(f);
+                }else{
+                    Alert alert = new Alert(Alert.AlertType.WARNING);
+                    alert.setTitle("Invalid File Type");
+                    alert.setContentText("Only .txt files are allowed");
+                    alert.show();
+                }
+
+                success = true;
+            }
+            dropEvent.setDropCompleted(success);
+            dropEvent.consume();
+        });
 
         VBox uploadBox = new VBox(8, uploadTitle, uploadButton);
         uploadBox.setAlignment(Pos.CENTER);
 
+        return uploadBox;
+    }
+
+    private static HBox inputRow() {
         // -- Starting Word Input ---
         Label startLabel = new Label("Starting Word");
         startLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
@@ -119,10 +151,10 @@ public class Javafx extends Application {
         startInput.setPrefWidth(180);
         startInput.setStyle(
                 "-fx-background-radius: 10;" +
-                "-fx-border-radius: 10;" +
-                "-fx-border-color: #d8dfe3;" +
-                "-fx-padding: 10 12 10 12;" +
-                "-fx-font-size: 13px;"
+                        "-fx-border-radius: 10;" +
+                        "-fx-border-color: #d8dfe3;" +
+                        "-fx-padding: 10 12 10 12;" +
+                        "-fx-font-size: 13px;"
         );
 
         /** Unneeded as generator needs lists of strings. -Vincent
@@ -152,6 +184,36 @@ public class Javafx extends Application {
         );
         inputRow.setAlignment(Pos.CENTER);
 
+        return inputRow;
+    }
+
+    private static VBox outputSection() {
+        Label outputLabel = new Label("Generated Sentence");
+        outputLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
+
+        TextArea outputArea = new TextArea("Your generated sentence will appear here...");
+        outputArea.setEditable(false);
+        outputArea.setWrapText(true);
+        outputArea.setPrefWidth(400);
+        outputArea.setPrefHeight(100);
+        outputArea.setStyle(
+                "-fx-font-style: italic;" +
+                        "-fx-text-fill: #4f5b4f;" +
+                        "-fx-font-size: 13px;" +
+                        "-fx-control-inner-background: #e4eddc;"
+        );
+
+        return new VBox(8, outputLabel, outputArea);
+    }
+
+    // MAIN SCENE which includes the upload and generation
+    private Scene buildMainScene(Stage stage) {
+        // --- Upload Section ---
+        VBox uploadBox = uploadSection(stage);
+
+        // --- Input Row ---
+        HBox inputRow = inputRow();
+
         // ---Generation & History Buttons---
         Button generateButton = new Button("Generate Sentence");
         generateButton.setStyle(
@@ -177,20 +239,7 @@ public class Javafx extends Application {
         );
 
         // ---Sentence Output Section--
-        Label outputLabel = new Label("Generated Sentence");
-        outputLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
-
-        TextArea outputArea = new TextArea("Your generated sentence will appear here...");
-        outputArea.setEditable(false);
-        outputArea.setWrapText(true);
-        outputArea.setPrefWidth(400);
-        outputArea.setPrefHeight(100);
-        outputArea.setStyle(
-                "-fx-font-style: italic;" +
-                "-fx-text-fill: #4f5b4f;" +
-                "-fx-font-size: 13px;" +
-                "-fx-control-inner-background: #e4eddc;"
-        );
+        VBox outputSection = outputSection();
 
 
         //Vincent Phan
@@ -223,7 +272,7 @@ public class Javafx extends Application {
         });
 
         // ---Compose Card Layout---
-        VBox card = new VBox(20, uploadBox, inputRow, generateButton, historyButton, new VBox(8, outputLabel, outputArea));
+        VBox card = new VBox(20, uploadBox, inputRow, generateButton, historyButton, outputSection);
         card.setAlignment(Pos.CENTER);
         card.setStyle(
                 "-fx-background-color: #ffffff;" +
@@ -239,8 +288,7 @@ public class Javafx extends Application {
         return new Scene(container, 600, 650);
     }
 
-    // HISTORY SCENE of the upload records
-    private Scene buildHistoryScene(Stage stage) {
+    private static TableView<SourceFile> createTable() {
         // Table for uploaded files
         TableView<SourceFile> importTable = new TableView<>();
         importTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
@@ -272,6 +320,9 @@ public class Javafx extends Application {
             if (change.wasAdded()) {
                 items.add(change.getValueAdded());
             }
+            if (change.wasRemoved()) {
+                items.remove(change.getValueRemoved());
+            }
         });
 
         // Load current files from DB
@@ -283,6 +334,13 @@ public class Javafx extends Application {
         }
 
         // Refresh thread to update table every 5 seconds
+        Thread refresh = getThread();
+        refresh.start();
+
+        return importTable;
+    }
+
+    private static Thread getThread() {
         Thread refresh = new Thread(() -> {
             while (true) {
                 try {
@@ -301,7 +359,13 @@ public class Javafx extends Application {
             }
         });
         refresh.setDaemon(true);
-        refresh.start();
+        return refresh;
+    }
+
+    // HISTORY SCENE of the upload records
+    private Scene buildHistoryScene(Stage stage) {
+        // Import Table
+        TableView<SourceFile> importTable = createTable();
 
         // Back button to return to main scene
         Button backButton = new Button("← Back");
@@ -331,6 +395,23 @@ public class Javafx extends Application {
     }
 
 
+    private static void importFile(File file){
+        Path dest = Path.of("data/clean", file.getName());
+
+        try {
+            Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
+            System.out.println("File saved");
+
+            //Kevin Tran
+            //Uses the shared DatabaseManager instance to import the file
+            boolean wordsOnly = false;
+            new ImporterCli(db).run(Path.of("data/clean"), wordsOnly);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     public static void selectFile(Stage stage){
         fileChooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("Text Files", "*.txt")
@@ -340,20 +421,7 @@ public class Javafx extends Application {
         File file = fileChooser.showOpenDialog(stage);
 
         if (file != null) {
-            Path dest = Path.of("data/clean", file.getName());
-
-            try {
-                Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
-                System.out.println("File saved");
-
-                //Kevin Tran
-                //Uses the shared DatabaseManager instance to import the file
-                boolean wordsOnly = false;
-                new ImporterCli(db).run(Path.of("data/clean"), wordsOnly);
-
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            importFile(file);
         } else {
             System.out.println("No file");
         }
