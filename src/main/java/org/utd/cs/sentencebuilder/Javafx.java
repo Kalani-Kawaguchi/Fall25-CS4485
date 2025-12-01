@@ -54,9 +54,7 @@ public class Javafx extends Application {
 
     private static final int MAX_WORDS = 1;
     private static final FileChooser fileChooser = new FileChooser();
-    //private static DatabaseManager db = new DatabaseManager();
     private static Scene homeScene;
-    //private static Scene historyScene; // redundant, delete soon
     private static ObservableMap<String, SourceFile> importedFiles = FXCollections.observableHashMap();
 
     private Scene mainScene;
@@ -248,8 +246,7 @@ public class Javafx extends Application {
         return new Scene(container, 600, 650);
     }
 
-    // HISTORY SCENE of the upload records
-    private Scene buildHistoryScene(Stage stage) {
+    private static TableView<SourceFile> createTable() {
         // Table for uploaded files
         TableView<SourceFile> importTable = new TableView<>();
         importTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
@@ -281,6 +278,9 @@ public class Javafx extends Application {
             if (change.wasAdded()) {
                 items.add(change.getValueAdded());
             }
+            if (change.wasRemoved()) {
+                items.remove(change.getValueRemoved());
+            }
         });
 
         // Load current files from DB
@@ -292,6 +292,13 @@ public class Javafx extends Application {
         }
 
         // Refresh thread to update table every 5 seconds
+        Thread refresh = getThread();
+        refresh.start();
+
+        return importTable;
+    }
+
+    private static Thread getThread() {
         Thread refresh = new Thread(() -> {
             while (true) {
                 try {
@@ -310,7 +317,13 @@ public class Javafx extends Application {
             }
         });
         refresh.setDaemon(true);
-        refresh.start();
+        return refresh;
+    }
+
+    // HISTORY SCENE of the upload records
+    private Scene buildHistoryScene(Stage stage) {
+        // Import Table
+        TableView<SourceFile> importTable = createTable();
 
         // Back button to return to main scene
         Button backButton = new Button("← Back");
