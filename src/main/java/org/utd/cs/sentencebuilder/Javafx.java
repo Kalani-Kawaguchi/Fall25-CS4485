@@ -47,6 +47,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+import org.utd.cs.sentencebuilder.FeatureBuilder;
+import org.utd.cs.sentencebuilder.LogisticRegressionEOS;
+import org.utd.cs.sentencebuilder.SentenceFeature;
+
 public class Javafx extends Application {
 
     private static DatabaseManager db; //Kevin Tran: Shared DatabaseManager instance
@@ -67,6 +71,9 @@ public class Javafx extends Application {
     private static TextField startInput;
     private static ComboBox<String> algoDropdown;
     private static TextArea outputArea;
+    private static StackPane mainContainer; // Reference to root to freeze UI
+    private static ProgressBar progressBar;
+    private static Label progressLabel;
 
     private Scene mainScene;
     private Scene historyScene;
@@ -270,12 +277,92 @@ public class Javafx extends Application {
                 "-fx-pref-width: 400;"
         );
 
+        progressBar = new ProgressBar(0);
+        progressBar.setPrefWidth(400);
+        progressBar.setVisible(false); // Hide initially
+
+        progressLabel = new Label("");
+        progressLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #666;");
+        progressLabel.setVisible(false); // Hide initially
+
+        Button trainButton = new Button("Build Features & Train Model");
+        trainButton.setStyle(
+                "-fx-background-color: #f0f0f0;" +
+                        "-fx-text-fill: #d9534f;" +
+                        "-fx-font-weight: bold;" +
+                        "-fx-font-size: 13px;" +
+                        "-fx-background-radius: 10;" +
+                        "-fx-border-radius: 10;" +
+                        "-fx-border-color: #d9534f;" +
+                        "-fx-pref-width: 400;"
+        );
+
+        trainButton.setOnAction(e -> {
+            // 1. Freeze UI
+            mainContainer.setDisable(true);
+            progressBar.setVisible(true);
+            progressBar.setProgress(0);
+            progressLabel.setVisible(true);
+            progressLabel.setText("Initializing...");
+            // 2. Run heavy logic in background thread
+            new Thread(() -> {
+                try {
+
+                    ProgressCallback featureCallback = (pct, msg) -> {
+                        Platform.runLater(() -> {
+                            progressBar.setProgress(pct);
+                            progressLabel.setText(msg);
+                        });
+                    };
+
+                    FeatureBuilder builder = new FeatureBuilder(db);
+                    builder.buildAllSentenceFeatures(featureCallback);
+
+                    File modelSavePath = new File("data/model/model.json");
+                    // Ensure directory exists
+                    modelSavePath.getParentFile().mkdirs();
+
+                    Platform.runLater(() -> {
+                        progressLabel.setText("Loading dataset...");
+                        progressBar.setProgress(-1); // Indeterminate mode while loading
+                    });
+
+                    List<SentenceFeature> dataset = db.getAllSentenceFeatures();
+
+                    LogisticRegressionEOS model = new LogisticRegressionEOS(0.1, 2_500, 0.05);
+
+                    ProgressCallback trainCallback = (pct, msg) -> {
+                        Platform.runLater(() -> {
+                            progressBar.setProgress(pct);
+                            progressLabel.setText(msg);
+                        });
+                    };
+
+                    model.fit(dataset, trainCallback);
+                    model.saveModel(modelSavePath);
+
+                    Platform.runLater(() -> {
+                        outputArea.setText("Success! Model saved.");
+                        progressBar.setProgress(1.0);
+                        progressLabel.setText("Done.");
+                    });
+
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                    Platform.runLater(() -> outputArea.setText("Error Training Model: " + ex.getMessage()));
+                } finally {
+                    // 3. Unfreeze UI
+                    Platform.runLater(() -> mainContainer.setDisable(false));
+                }
+            }).start();
+        });
+
         // ---Sentence Output Section--
         VBox outputSection = outputSection();
 
 
         // ---Compose Card Layout---
-        VBox card = new VBox(20, uploadBox, inputRow, generateButton, historyButton, outputSection);
+        VBox card = new VBox(20, uploadBox, inputRow, generateButton, historyButton, trainButton, progressBar, progressLabel, outputSection);
         card.setAlignment(Pos.CENTER);
         card.setStyle(
                 "-fx-background-color: #ffffff;" +
@@ -284,11 +371,11 @@ public class Javafx extends Application {
         );
         card.setPadding(new javafx.geometry.Insets(30));
 
-        StackPane container = new StackPane(card);
-        container.setAlignment(Pos.CENTER);
-        container.setStyle("-fx-background-color: #f8fafb;");
+        mainContainer = new StackPane(card);
+        mainContainer.setAlignment(Pos.CENTER);
+        mainContainer.setStyle("-fx-background-color: #f8fafb;");
 
-        return new Scene(container, 600, 650);
+        return new Scene(mainContainer, 600, 750);
     }
 
     private static TableView<SourceFile> createTable() {
@@ -367,7 +454,7 @@ public class Javafx extends Application {
         return new Scene(container, 600, 650);
     }
 
-    private void refreshHistory() {
+    private static void refreshHistory() {
         new Thread(() -> {
             try {
                 // 1. Database Call (Background Thread)
@@ -391,8 +478,52 @@ public class Javafx extends Application {
 
 
     private static void importFile(File file){
-        Path dest = Path.of("data/clean", file.getName());
+        mainContainer.setDisable(true);
+        progressBar.setVisible(true);
+        progressBar.setProgress(0);
+        progressLabel.setVisible(true);
+        progressLabel.setText("Copying file...");
 
+        new Thread(()-> {
+            Path dest = Path.of("data/clean", file.getName());
+            try {
+                // Copy File
+                Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
+                System.out.println("File saved to: " + dest);
+
+                // Create Callback
+                ProgressCallback callback = (pct, msg) -> {
+                    Platform.runLater(() -> {
+                        progressBar.setProgress(pct);
+                        progressLabel.setText(msg);
+                    });
+                };
+
+                new ImporterCli(db).runStreaming(Path.of("data/clean"), callback);
+
+                Platform.runLater(() -> {
+                    progressBar.setProgress(1.0);
+                    progressLabel.setText("Import Complete!");
+                    // Refresh the history table so the new file shows up immediately
+                    refreshHistory();
+                });
+
+            } catch (IOException | SQLException | RuntimeException e) {
+                e.printStackTrace();
+                Platform.runLater(() -> {
+                    progressLabel.setText("Error: " + e.getMessage());
+                    progressLabel.setStyle("-fx-text-fill: red;");
+                });
+            } finally {
+                Platform.runLater(() -> {
+                    mainContainer.setDisable(false);
+                    // Optional: fade out progress bar after a delay
+                });
+            }
+        }).start();
+        /**
+        Path dest = Path.of("data/clean", file.getName());
+        mainContainer.setDisable(true);
         try {
             Files.copy(file.toPath(), dest, StandardCopyOption.REPLACE_EXISTING);
             System.out.println("File saved");
@@ -400,11 +531,18 @@ public class Javafx extends Application {
             //Kevin Tran
             //Uses the shared DatabaseManager instance to import the file
             boolean wordsOnly = false;
-            new ImporterCli(db).run(Path.of("data/clean"), wordsOnly);
+
+            //new ImporterCli(db).run(Path.of("data/clean"), wordsOnly);
+            new ImporterCli(db).runStreaming(Path.of("data/clean"));
+
 
         } catch (IOException e) {
             e.printStackTrace();
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
         }
+        mainContainer.setDisable(false);
+         */
     }
 
     public static void selectFile(Stage stage){

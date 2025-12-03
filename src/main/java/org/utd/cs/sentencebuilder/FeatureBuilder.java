@@ -16,6 +16,7 @@ package org.utd.cs.sentencebuilder;
 
 import java.sql.*;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -276,12 +277,31 @@ public class FeatureBuilder {
      * Streams all sentences from the database and computes features for each.
      * This will safely process large datasets without excessive memory use.
      */
-    public void buildAllSentenceFeatures() throws SQLException {
+    public void buildAllSentenceFeatures(ProgressCallback callback) throws SQLException {
         logger.info("Starting sentence feature generation...");
         // Ensure batch is clear before starting
         this.featureBatch.clear();
 
-        db.processSentences(this::processSentence);
+        long totalSentences = db.getSentenceCount();
+        AtomicInteger processedCount = new AtomicInteger(0);
+
+        db.processSentences(sentence -> {
+
+            // A. Run the heavy logic
+            processSentence(sentence);
+
+            // B. Increment and Update UI
+            int current = processedCount.incrementAndGet();
+
+            // Only update UI every 500 records to prevent freezing
+            if (callback != null && current % 500 == 0) {
+                double progress = (double) current / totalSentences;
+                // Cap at 95% so we leave room for the Synthetic step
+                double scaledProgress = progress * 0.95;
+                callback.update(scaledProgress,
+                        String.format("Extracting Features: %d / %d", current, totalSentences));
+            }
+        });
 
         // After all sentences are processed, flush any remaining features
         if (!featureBatch.isEmpty()) {
@@ -292,6 +312,7 @@ public class FeatureBuilder {
         logger.info("Generating synthetic EOS samples");
         generateSyntheticFeatures();
 
+        if (callback != null) callback.update(1.0, "Feature Extraction Complete.");
         logger.info("Feature generation complete.");
     }
 

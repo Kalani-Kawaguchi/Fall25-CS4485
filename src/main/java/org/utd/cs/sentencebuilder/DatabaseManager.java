@@ -278,11 +278,31 @@ public class DatabaseManager {
     }
 
     /**
+     * Returns the total number of sentences in the database.
+     *
+     * @return The count of all rows in the sentences table.
+     * @throws SQLException if a database access error occurs.
+     */
+    public long getSentenceCount() throws SQLException {
+        String sql = "SELECT COUNT(*) AS total FROM sentences";
+
+        try (Connection conn = getConnect();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            if (rs.next()) {
+                return rs.getLong("total");
+            }
+        }
+
+        return 0; // Should never happen unless table is empty
+    }
+
+
+    /**
      * Streams all sentences from the database and processes them one by one
      * using the provided Consumer.
      *
-     * This is the memory-efficient approach, ideal for very large datasets.
-     * It uses the streaming hints from your original method.
      *
      * @param sentenceConsumer A function that accepts and processes a single Sentence.
      * @throws SQLException if a database access error occurs.

@@ -30,21 +30,26 @@ import java.util.*;
  */
 public class BigramGreedyGenerator implements SentenceGenerator {
 
-    private static final int DEFAULT_MAX_TOKENS = 20;
+    private static final int DEFAULT_MAX_TOKENS = 1000;
 
     private final Map<String, Integer> wordToId;
     private final Map<Integer, String> idToWord;
     private final Map<Integer, List<int[]>> followers;
     private final List<int[]> startCandidates;
 
+    private final EosPredictor eosPredictor;
+    private static final double EOS_THRESHOLD = 0.5;
+
     public BigramGreedyGenerator(Map<String, Integer> wordToId,
                                  Map<Integer, String> idToWord,
                                  Map<Integer, List<int[]>> followers,
-                                 List<int[]> startCandidates) {
+                                 List<int[]> startCandidates,
+                                 EosPredictor eosPredictor) {
         this.wordToId = wordToId;
         this.idToWord = idToWord;
         this.followers = followers;
         this.startCandidates = startCandidates;
+        this.eosPredictor = eosPredictor;
     }
 
     @Override
@@ -116,10 +121,10 @@ public class BigramGreedyGenerator implements SentenceGenerator {
     }
 
     private String buildGreedySentence(List<Integer> seed, int maxTokens, String stopWordRaw) {
-        final String stopWord = (stopWordRaw == null) ? null : stopWordRaw.toLowerCase(Locale.ROOT);
+//        final String stopWord = (stopWordRaw == null) ? null : stopWordRaw.toLowerCase(Locale.ROOT);
 
         List<Integer> ids = new ArrayList<>(seed);
-        Set<Integer> visited = new HashSet<>(ids);
+//        Set<Integer> visited = new HashSet<>(ids);
         int curr = ids.get(ids.size() - 1);
         Integer last = null;
         Set<Long> usedPairs = new HashSet<>();
@@ -145,14 +150,19 @@ public class BigramGreedyGenerator implements SentenceGenerator {
             if (nextId == curr) break;
 
             ids.add(nextId);
-            visited.add(nextId);
+//            visited.add(nextId);
             last = curr;
             curr = nextId;
 
-            if (stopWord != null) {
-                String w = idToWord.getOrDefault(curr, "").toLowerCase(Locale.ROOT);
-                if (w.equals(stopWord)) break;
+            double eosProb = eosPredictor.predictEosProbability(ids);
+            if (eosProb >= EOS_THRESHOLD) {
+                break;
             }
+
+//            if (stopWord != null) {
+//                String w = idToWord.getOrDefault(curr, "").toLowerCase(Locale.ROOT);
+//                if (w.equals(stopWord)) break;
+//            }
         }
 
         return render(ids);
@@ -168,7 +178,7 @@ public class BigramGreedyGenerator implements SentenceGenerator {
         return sb.toString();
     }
 
-    public String generateSentenceWithStop(String stopWord) {
-        return generateSentence(DEFAULT_MAX_TOKENS, stopWord);
-    }
+//    public String generateSentenceWithStop(String stopWord) {
+//        return generateSentence(DEFAULT_MAX_TOKENS, stopWord);
+//    }
 }

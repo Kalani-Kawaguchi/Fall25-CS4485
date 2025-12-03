@@ -161,20 +161,43 @@ public class ImporterCli {
 
     /**
      * Vincent Phan
-     * Experimental. If we keep data local to every thread, we don't need to globally accumlate anything (words and sentences)
-     * and let each thread collect and the DB can handle reducing.
+     * Experimental. Upload instantly rather than accumulating globally.
      */
-    public void runStreaming(Path root) throws SQLException, IOException {
+    public void runStreaming(Path root, ProgressCallback callback) throws SQLException, IOException {
         List<Path> files = listTextFiles(root);
         logger.info("Import start for " + files.size() + " files.");
 
+        // 2. Get existing files from DB to determine what actually needs work
+        Map<String, SourceFile> existingFiles = db.getAllSourceFiles();
+
+        // 3. Filter the list (The "ToDo" list)
+        List<Path> filesToProcess = new ArrayList<>();
+        for (Path p : files) {
+            if (!existingFiles.containsKey(p.getFileName().toString())) {
+                filesToProcess.add(p);
+            }
+        }
+
+        int total = filesToProcess.size();
+        logger.info("Found {} total files. {} new files to process.", files.size(), total);
+
+        if (total == 0) {
+            if (callback != null) callback.update(1.0, "No new files to import.");
+            return;
+        }
+
         try {
             Map<String, SourceFile> importedFiles = db.getAllSourceFiles();
-            for (Path file : files) {
-                if (importedFiles.containsKey(file.getFileName().toString())) {
-                    logger.info(file.getFileName() + " is already imported. Skipping file.");
-                    continue;
+            for (int i = 0; i < total; i++) {
+
+                Path file = filesToProcess.get(i);
+                String fileName = file.getFileName().toString();
+
+                if (callback != null) {
+                    double percent = (double) i / total;
+                    callback.update(percent, "Importing: " + fileName);
                 }
+
                 logger.info("Processing " + file.getFileName());
 
                 String text = Files.readString(file);
@@ -216,17 +239,6 @@ public class ImporterCli {
             db.pruneOutliers(.99);
             db.recomputeLengthHazards();
             logger.info("Import complete");
-
-            logger.info("Extracting Features");
-            //should be called by itself after importer rather than inside importer.
-            FeatureBuilder builder = new FeatureBuilder(db);
-            builder.buildAllSentenceFeatures();
-            File modelSavePath = new File("data/model/model.json");
-            List<SentenceFeature> dataset = db.getAllSentenceFeatures();
-            LogisticRegressionEOS model = new LogisticRegressionEOS(0.1, 2_500, 0.05);
-            model.fit(dataset);
-            model.saveModel(modelSavePath);
-            logger.info("Importer Complete.");
 
         } catch (Exception e) {
             e.printStackTrace();

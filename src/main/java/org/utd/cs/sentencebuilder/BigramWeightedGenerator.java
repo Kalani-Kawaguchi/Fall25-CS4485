@@ -31,15 +31,19 @@ public class BigramWeightedGenerator implements SentenceGenerator {
     private final Map<Integer, List<int[]>> followers;
     private final List<int[]> startCandidates;
     private final Random random = new Random();
+    private final EosPredictor eosPredictor;
+    private static final double EOS_THRESHOLD = 0.5;
 
     public BigramWeightedGenerator(Map<String, Integer> wordToId,
                                    Map<Integer, String> idToWord,
                                    Map<Integer, List<int[]>> followers,
-                                   List<int[]> startCandidates) {
+                                   List<int[]> startCandidates,
+                                   EosPredictor eosPredictor) {
         this.wordToId = wordToId;
         this.idToWord = idToWord;
         this.followers = followers;
         this.startCandidates = startCandidates;
+        this.eosPredictor = eosPredictor;
     }
 
     @Override
@@ -124,8 +128,8 @@ public class BigramWeightedGenerator implements SentenceGenerator {
         return startCandidates.get(0)[0];
     }
 
-    private String buildSentence(List<Integer> seed, int maxTokens, String stopWordRaw) {
-        final String stopWord = (stopWordRaw == null) ? null : stopWordRaw.toLowerCase(Locale.ROOT);
+    private String buildSentence(List<Integer> seed, int maxTokens, String stopWord) {
+        //final String stopWord = (stopWordRaw == null) ? null : stopWordRaw.toLowerCase(Locale.ROOT);
 
         List<Integer> ids = new ArrayList<>(seed);
         Set<Integer> visited = new HashSet<>(ids);
@@ -142,10 +146,17 @@ public class BigramWeightedGenerator implements SentenceGenerator {
             visited.add(nextId);
             curr = nextId;
 
-            if (stopWord != null) {
-                String w = idToWord.getOrDefault(curr, "").toLowerCase(Locale.ROOT);
-                if (w.equals(stopWord)) break;
+            double eosProb = eosPredictor.predictEosProbability(ids);
+
+            //Really only stops run-on sentences.
+            if (eosProb >= EOS_THRESHOLD) {
+                break;
             }
+
+//            if (stopWord != null) {
+//                String w = idToWord.getOrDefault(curr, "").toLowerCase(Locale.ROOT);
+//                if (w.equals(stopWord)) break;
+//            }
         }
 
         return render(ids);

@@ -33,6 +33,9 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
     // (w1,w2) encoded as long -> list of (w3, count), sorted desc by count
     private final Map<Long, List<int[]>> followers;
 
+    private final EosPredictor eosPredictor;
+    private static final double EOS_THRESHOLD = 0.5;
+
     /** Given a first word id, pick a good second id so (w1,w2) is a valid trigram context. */
     private Integer pickGreedySecondGivenFirst(int firstId) {
         int bestSecond = -1;
@@ -62,10 +65,12 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
     public TrigramGreedyGenerator(Map<String, Integer> wordToId,
                                   Map<Integer, String> idToWord,
                                   Map<Long, List<int[]>> trigramFollowers,
-                                  List<int[]> startCandidates) {
+                                  List<int[]> startCandidates,
+                                  EosPredictor eosPredictor) {
         this.wordToId        = wordToId;
         this.idToWord        = idToWord;
         this.followers       = trigramFollowers;
+        this.eosPredictor    = eosPredictor;
     }
 
     @Override
@@ -196,7 +201,7 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
     private String buildGreedySentence(List<Integer> seed, int maxTokens, String stopWordRaw) {
         if (seed.size() < 2) return "";
 
-        final String stopWord = (stopWordRaw == null) ? null : stopWordRaw.toLowerCase(Locale.ROOT);
+//        final String stopWord = (stopWordRaw == null) ? null : stopWordRaw.toLowerCase(Locale.ROOT);
 
         List<Integer> ids = new ArrayList<>(seed);
         Set<Integer> visited = new HashSet<>(ids);  // simple loop guard
@@ -238,9 +243,14 @@ public class TrigramGreedyGenerator implements SentenceGenerator {
             secondLast = last;
             last       = nextId;
 
-            if (stopWord != null) {
-                String w = idToWord.getOrDefault(last, "").toLowerCase(Locale.ROOT);
-                if (w.equals(stopWord)) break;
+//            if (stopWord != null) {
+//                String w = idToWord.getOrDefault(last, "").toLowerCase(Locale.ROOT);
+//                if (w.equals(stopWord)) break;
+//            }
+
+            double eosProb = eosPredictor.predictEosProbability(ids);
+            if (eosProb >= EOS_THRESHOLD) {
+                break;
             }
         }
 

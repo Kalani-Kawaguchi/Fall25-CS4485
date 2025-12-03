@@ -62,11 +62,16 @@ public class LogisticRegressionEOS {
         return sigmoid(z);
     }
 
-    public void fit(List<SentenceFeature> data) {
+    public void fit(List<SentenceFeature> data, ProgressCallback callback) {
         double bestLoss = Double.MAX_VALUE;
         int epochsSinceImprove = 0;
         // classic binary cross entropy. L = -[ylog(p) + (1-y)log(1[p)]
         for (int epoch = 0; epoch < maxEpochs; epoch++) {
+
+            if (callback != null && epoch % 10 == 0) {
+                double percent = (double) epoch / maxEpochs;
+                callback.update(percent, "Training Model: Epoch " + epoch);
+            }
 
             double db = 0, dw1 = 0, dw2 = 0, dw3 = 0;
 

@@ -49,7 +49,8 @@ public class GeneratorFactory {
                         w2i,
                         i2w,
                         data.getBigramFollowers(),
-                        data.getStartCandidates()
+                        data.getStartCandidates(),
+                        predictor
                 );
             case "bi_greedy":
                 System.out.println("bi greedy created");
@@ -57,7 +58,8 @@ public class GeneratorFactory {
                         w2i,
                         i2w,
                         data.getBigramFollowers(),
-                        data.getStartCandidates()
+                        data.getStartCandidates(),
+                        predictor
                 );
 
             case "bi_greedy_eos":
@@ -71,7 +73,8 @@ public class GeneratorFactory {
                         w2i,
                         i2w,
                         data.getTrigramFollowers(),
-                        data.getStartCandidates()
+                        data.getStartCandidates(),
+                        predictor
                 );
 
             case "tri_greedy":
@@ -79,7 +82,8 @@ public class GeneratorFactory {
                         w2i,
                         i2w,
                         data.getTrigramFollowers(),
-                        data.getStartCandidates()
+                        data.getStartCandidates(),
+                        predictor
                 );
 
             default:

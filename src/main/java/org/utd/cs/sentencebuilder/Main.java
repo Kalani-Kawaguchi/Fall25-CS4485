@@ -1,5 +1,6 @@
 package org.utd.cs.sentencebuilder;
 
+import java.io.IOException;
 import java.sql.SQLException;
 import java.util.*;
 
@@ -23,6 +24,8 @@ public class Main {
         } catch (SQLException e) {
             System.err.println("❌ Database operation failed: " + e.getMessage());
             e.printStackTrace();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         } finally {
             // Cleanly shut down Hikari connection pool
             DatabaseManager.closeDataSource();

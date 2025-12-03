@@ -27,13 +27,18 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
     private final Map<Integer, String> idToWord;
     private final Map<Long, List<int[]>> followers;
 
+    private EosPredictor eosPredictor;
+    private static final double EOS_THRESHOLD = 0.5;
+
     public TrigramWeightedGenerator(Map<String, Integer> wordToId,
                                     Map<Integer, String> idToWord,
                                     Map<Long, List<int[]>> trigramFollowers,
-                                    List<int[]> startCandidates) {
+                                    List<int[]> startCandidates,
+                                    EosPredictor eosPredictor) {
         this.wordToId        = wordToId;
         this.idToWord        = idToWord;
         this.followers       = trigramFollowers;
+        this.eosPredictor       = eosPredictor;
     }
 
     /** Weighted choice of secondId given firstId, based on total trigram counts. */
@@ -192,8 +197,8 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
                                  String stopWordRaw) {
         if (seed.size() < 2) return "";
 
-        final String stopWord =
-                (stopWordRaw == null ? null : stopWordRaw.toLowerCase(Locale.ROOT));
+//        final String stopWord =
+//                (stopWordRaw == null ? null : stopWordRaw.toLowerCase(Locale.ROOT));
 
         List<Integer> ids = new ArrayList<>(seed);
         Set<String> usedTrigrams = new HashSet<>();
@@ -239,9 +244,14 @@ public class TrigramWeightedGenerator implements SentenceGenerator {
             secondLast = last;
             last       = nextId;
 
-            if (stopWord != null) {
-                String w = idToWord.getOrDefault(last, "").toLowerCase(Locale.ROOT);
-                if (w.equals(stopWord)) break;
+//            if (stopWord != null) {
+//                String w = idToWord.getOrDefault(last, "").toLowerCase(Locale.ROOT);
+//                if (w.equals(stopWord)) break;
+//            }
+
+            double eosProb = eosPredictor.predictEosProbability(ids);
+            if (eosProb >= EOS_THRESHOLD) {
+                break;
             }
         }
 
