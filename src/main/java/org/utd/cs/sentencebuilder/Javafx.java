@@ -255,7 +255,10 @@ public class Javafx extends Application {
         });
 
         Button historyButton = new Button("View Upload History");
-        historyButton.setOnAction(e -> stage.setScene(historyScene));
+        historyButton.setOnAction(e -> {
+            refreshHistory();
+            stage.setScene(historyScene);
+        });
         historyButton.setStyle(
                 "-fx-background-color: #ffffff;" +
                 "-fx-text-fill: #4a4f57;" +
@@ -333,33 +336,7 @@ public class Javafx extends Application {
             e.printStackTrace();
         }
 
-        // Refresh thread to update table every 5 seconds
-        Thread refresh = getThread();
-        refresh.start();
-
         return importTable;
-    }
-
-    private static Thread getThread() {
-        Thread refresh = new Thread(() -> {
-            while (true) {
-                try {
-                    Thread.sleep(5000);
-                    Map<String, SourceFile> updated = db.getAllSourceFiles();
-                    Platform.runLater(() -> {
-                        for (String key : updated.keySet()) {
-                            if (!importedFiles.containsKey(key)) {
-                                importedFiles.put(key, updated.get(key));
-                            }
-                        }
-                    });
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
-        });
-        refresh.setDaemon(true);
-        return refresh;
     }
 
     // HISTORY SCENE of the upload records
@@ -388,6 +365,24 @@ public class Javafx extends Application {
         container.setStyle("-fx-background-color: #f8fafb;");
 
         return new Scene(container, 600, 650);
+    }
+
+    private void refreshHistory() {
+        new Thread(() -> {
+            try {
+                // 1. Database Call (Background Thread)
+                Map<String, SourceFile> freshData = db.getAllSourceFiles();
+
+                // 2. Update UI (JavaFX Application Thread)
+                Platform.runLater(() -> {
+                    // Clear old data and put fresh data to ensure we catch deletions too
+                    importedFiles.clear();
+                    importedFiles.putAll(freshData);
+                });
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }).start();
     }
 
     public static void main(String[] args) {
