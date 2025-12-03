@@ -44,6 +44,7 @@ public class GeneratorFactory {
 
         switch (algo) {
             case "bi_weighted":
+                System.out.println("bi weighted created");
                 return new BigramWeightedGenerator(
                         w2i,
                         i2w,
@@ -51,6 +52,7 @@ public class GeneratorFactory {
                         data.getStartCandidates()
                 );
             case "bi_greedy":
+                System.out.println("bi greedy created");
                 return new BigramGreedyGenerator(
                         w2i,
                         i2w,

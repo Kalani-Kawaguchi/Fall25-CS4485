@@ -14,6 +14,9 @@ public class Main {
             //hands the shared DatabaseManager instance to Javafx
             Javafx.setDatabaseManager(db);
 
+            GeneratorController controller = new GeneratorController(db);
+            Javafx.setGeneratorController(controller);
+
             Javafx.main(args); //blocks here until JavaFX application exits
 
             //db.clearAllData();
