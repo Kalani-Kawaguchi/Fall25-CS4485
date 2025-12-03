@@ -43,6 +43,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 
 public class Javafx extends Application {
@@ -51,11 +53,20 @@ public class Javafx extends Application {
     public static void setDatabaseManager(DatabaseManager databaseManager) {
         db = databaseManager;
     }
+    // Unified Controller
+    private static GeneratorController generatorController;
+    public static void setGeneratorController(GeneratorController controller) {
+        generatorController = controller;
+    }
 
     private static final int MAX_WORDS = 1;
     private static final FileChooser fileChooser = new FileChooser();
     private static Scene homeScene;
     private static ObservableMap<String, SourceFile> importedFiles = FXCollections.observableHashMap();
+
+    private static TextField startInput;
+    private static ComboBox<String> algoDropdown;
+    private static TextArea outputArea;
 
     private Scene mainScene;
     private Scene historyScene;
@@ -141,7 +152,7 @@ public class Javafx extends Application {
         Label startLabel = new Label("Starting Word");
         startLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
 
-        TextField startInput = new TextField();
+        startInput = new TextField();
         startInput.setPromptText("Enter a word to begin...");
         startInput.setPrefWidth(180);
         startInput.setStyle(
@@ -152,18 +163,18 @@ public class Javafx extends Application {
                         "-fx-font-size: 13px;"
         );
 
-        startInput.textProperty().addListener((observableValue, oldValue, newValue) -> {
-            String[] words = newValue.trim().split("\\s+");
-            if (words.length > MAX_WORDS) startInput.setText(words[0]);
-        });
-
         // ---Algorithm Dropdown Selection ---
         Label algoLabel = new Label("Algorithm");
         algoLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
 
-        ComboBox<String> algoDropdown = new ComboBox<>();
-        algoDropdown.getItems().addAll("Greedy"); // add more if needed
-        algoDropdown.setValue("Greedy");
+        algoDropdown = new ComboBox<>();
+        algoDropdown.getItems().addAll(
+                "bi_greedy",
+                "bi_weighted",
+                "tri_greedy",
+                "tri_weighted"
+        );
+        algoDropdown.setValue("bi_greedy");
         algoDropdown.setPrefWidth(180);
 
         HBox inputRow = new HBox(25,
@@ -179,7 +190,7 @@ public class Javafx extends Application {
         Label outputLabel = new Label("Generated Sentence");
         outputLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333333;");
 
-        TextArea outputArea = new TextArea("Your generated sentence will appear here...");
+        outputArea = new TextArea("Your generated sentence will appear here...");
         outputArea.setEditable(false);
         outputArea.setWrapText(true);
         outputArea.setPrefWidth(400);
@@ -213,8 +224,41 @@ public class Javafx extends Application {
                 "-fx-pref-width: 400;"
         );
 
+        //Vincent Phan
+        generateButton.setOnAction(e -> {
+            String startingText = startInput.getText().trim();
+            String selectedAlgo = algoDropdown.getValue();
+
+            // 1. Validation
+            if (generatorController == null) {
+                outputArea.setText("Error: Generator Controller is not initialized.");
+                return;
+            }
+            if (startingText.isEmpty()) {
+                outputArea.setText("Please enter a starting word.");
+                return;
+            }
+
+            // 2. Prepare Input (List<String>)
+            List<String> seed = Arrays.asList(startingText.split("\\s+"));
+
+            try {
+                String result = generatorController.generate(selectedAlgo, seed);
+
+                // 4. Display
+                outputArea.setText(result);
+
+            } catch (Exception ex) {
+                ex.printStackTrace();
+                outputArea.setText("Error generating sentence: " + ex.getMessage());
+            }
+        });
+
         Button historyButton = new Button("View Upload History");
-        historyButton.setOnAction(e -> stage.setScene(historyScene));
+        historyButton.setOnAction(e -> {
+            refreshHistory();
+            stage.setScene(historyScene);
+        });
         historyButton.setStyle(
                 "-fx-background-color: #ffffff;" +
                 "-fx-text-fill: #4a4f57;" +
@@ -228,6 +272,7 @@ public class Javafx extends Application {
 
         // ---Sentence Output Section--
         VBox outputSection = outputSection();
+
 
         // ---Compose Card Layout---
         VBox card = new VBox(20, uploadBox, inputRow, generateButton, historyButton, outputSection);
@@ -291,33 +336,7 @@ public class Javafx extends Application {
             e.printStackTrace();
         }
 
-        // Refresh thread to update table every 5 seconds
-        Thread refresh = getThread();
-        refresh.start();
-
         return importTable;
-    }
-
-    private static Thread getThread() {
-        Thread refresh = new Thread(() -> {
-            while (true) {
-                try {
-                    Thread.sleep(5000);
-                    Map<String, SourceFile> updated = db.getAllSourceFiles();
-                    Platform.runLater(() -> {
-                        for (String key : updated.keySet()) {
-                            if (!importedFiles.containsKey(key)) {
-                                importedFiles.put(key, updated.get(key));
-                            }
-                        }
-                    });
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
-        });
-        refresh.setDaemon(true);
-        return refresh;
     }
 
     // HISTORY SCENE of the upload records
@@ -346,6 +365,24 @@ public class Javafx extends Application {
         container.setStyle("-fx-background-color: #f8fafb;");
 
         return new Scene(container, 600, 650);
+    }
+
+    private void refreshHistory() {
+        new Thread(() -> {
+            try {
+                // 1. Database Call (Background Thread)
+                Map<String, SourceFile> freshData = db.getAllSourceFiles();
+
+                // 2. Update UI (JavaFX Application Thread)
+                Platform.runLater(() -> {
+                    // Clear old data and put fresh data to ensure we catch deletions too
+                    importedFiles.clear();
+                    importedFiles.putAll(freshData);
+                });
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }).start();
     }
 
     public static void main(String[] args) {
