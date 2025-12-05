@@ -1,0 +1,3 @@
+db.url=jdbc:mysql://localhost:3306/seqdb?characterEncoding=UTF-8&createDatabaseIfNotExist=true
+db.user=root
+db.password=password
